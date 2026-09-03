@@ -84,7 +84,7 @@
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback, useRef } = React;
-const VERSION = "v2.0";
+const VERSION = "v2.1";
 
 /* ============================== ICONS (SVG thuần, không phụ thuộc thư viện) ============================== */
 function Icon({ name, size = 14, color = "currentColor" }) {
@@ -301,6 +301,34 @@ async function fetchSingleTicker24hr(symbol) {
   const res = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
   if (!res.ok) throw new Error(`Binance ticker lỗi ${res.status}`);
   return res.json();
+}
+const GIST_FILENAME = "spot-terminal-sync.json";
+async function ghCreateGist(token, payload) {
+  const res = await fetch("https://api.github.com/gists", {
+    method: "POST",
+    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github+json" },
+    body: JSON.stringify({ description: "Spot Terminal — dữ liệu đồng bộ (bí mật, không chia sẻ)", public: false, files: { [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) } } }),
+  });
+  if (!res.ok) throw new Error(`Tạo gist thất bại (mã ${res.status}) — kiểm tra lại token`);
+  return res.json();
+}
+async function ghPushGist(token, gistId, payload) {
+  const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+    method: "PATCH",
+    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github+json" },
+    body: JSON.stringify({ files: { [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) } } }),
+  });
+  if (!res.ok) throw new Error(`Đồng bộ lên thất bại (mã ${res.status})`);
+  return res.json();
+}
+async function ghPullGist(token, gistId) {
+  const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+    headers: { Authorization: `token ${token}`, Accept: "application/vnd.github+json" },
+  });
+  if (!res.ok) throw new Error(`Tải dữ liệu đồng bộ thất bại (mã ${res.status})`);
+  const data = await res.json();
+  const content = data.files && data.files[GIST_FILENAME] && data.files[GIST_FILENAME].content;
+  return content ? JSON.parse(content) : null;
 }
 async function fetchBinanceKlinesRange(symbol, interval, startTime, endTime) {
   let all = [];
@@ -686,6 +714,13 @@ function CryptoTerminal() {
   const [trades, setTrades] = useState([]);
   const [dataReady, setDataReady] = useState(false);
   const [persistMode, setPersistMode] = useState("checking"); // 'cloud' | 'local' | 'none' | 'checking'
+  const [ghToken, setGhToken] = useState("");
+  const [ghGistId, setGhGistId] = useState("");
+  const [ghSyncStatus, setGhSyncStatus] = useState("idle"); // 'idle' | 'syncing' | 'error'
+  const [ghSyncMessage, setGhSyncMessage] = useState(null);
+  const [ghLastSynced, setGhLastSynced] = useState(null);
+  const [ghPendingRemote, setGhPendingRemote] = useState(null); // dữ liệu mới hơn phát hiện từ thiết bị khác, chờ xác nhận
+  const [localLastModified, setLocalLastModified] = useState(null);
 
   const [coinInput, setCoinInput] = useState("");
   const [analysis, setAnalysis] = useState(null);
@@ -713,10 +748,11 @@ function CryptoTerminal() {
       if (parsed.goalMonthlyPct != null) setGoalMonthlyPct(parsed.goalMonthlyPct);
       if (parsed.goalAdjustments) setGoalAdjustments(parsed.goalAdjustments);
       if (parsed.goalMonths) setGoalMonths(parsed.goalMonths);
+      if (parsed.lastModified) setLocalLastModified(parsed.lastModified);
     } catch (e) {}
   }
   function exportBackup() {
-    const payload = JSON.stringify({ capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, exportedAt: new Date().toISOString() }, null, 2);
+    const payload = JSON.stringify({ capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, lastModified: localLastModified, exportedAt: new Date().toISOString() }, null, 2);
     const blob = new Blob([payload], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -762,19 +798,105 @@ function CryptoTerminal() {
       } else {
         setPersistMode("none");
       }
+      // v2.1: cấu hình đồng bộ GitHub (token + gistId) nằm ở ổ lưu RIÊNG, tách biệt hoàn toàn khỏi
+      // dữ liệu chính — để không bao giờ vô tình lọt vào file sao lưu hay bản backup chia sẻ.
+      try {
+        const ghRaw = window.localStorage.getItem("gh-sync-config");
+        if (ghRaw) {
+          const gh = JSON.parse(ghRaw);
+          if (gh.token) setGhToken(gh.token);
+          if (gh.gistId) setGhGistId(gh.gistId);
+        }
+      } catch (e) {}
       setDataReady(true);
     })();
   }, []);
 
+  const isFirstSaveRef = useRef(true);
   useEffect(() => {
     if (!dataReady || persistMode === "none" || persistMode === "checking") return;
-    const payload = JSON.stringify({ capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths });
+    let lm;
+    if (isFirstSaveRef.current) {
+      isFirstSaveRef.current = false;
+      lm = localLastModified || new Date().toISOString();
+    } else {
+      lm = new Date().toISOString();
+    }
+    if (lm !== localLastModified) setLocalLastModified(lm);
+    const stateObj = { capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, lastModified: lm };
+    const payload = JSON.stringify(stateObj);
     if (persistMode === "cloud") {
       window.storage.set("terminal-state", payload).catch(() => {});
     } else if (persistMode === "local") {
       try { window.localStorage.setItem("terminal-state", payload); } catch (e) {}
     }
-  }, [capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, dataReady, persistMode]);
+    // v2.1: đồng bộ GitHub tự động — mỗi lần dữ liệu thay đổi và đã lưu cục bộ xong, đẩy luôn lên Gist
+    // nếu đã cấu hình. Không chặn giao diện, lỗi (nếu có) chỉ hiện thông báo nhỏ, không làm gián đoạn.
+    if (ghToken && ghGistId) {
+      setGhSyncStatus("syncing");
+      ghPushGist(ghToken, ghGistId, stateObj)
+        .then(() => { setGhSyncStatus("idle"); setGhLastSynced(lm); setGhSyncMessage(null); })
+        .catch((e) => { setGhSyncStatus("error"); setGhSyncMessage(e.message || "Lỗi đồng bộ lên GitHub"); });
+    }
+  }, [capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, dataReady, persistMode, ghToken, ghGistId]);
+
+  useEffect(() => {
+    if (!dataReady) return;
+    try {
+      if (ghToken || ghGistId) window.localStorage.setItem("gh-sync-config", JSON.stringify({ token: ghToken, gistId: ghGistId }));
+      else window.localStorage.removeItem("gh-sync-config");
+    } catch (e) {}
+  }, [ghToken, ghGistId, dataReady]);
+
+  const ghCheckedOnceRef = useRef(false);
+  useEffect(() => {
+    if (!dataReady || !ghToken || !ghGistId || ghCheckedOnceRef.current) return;
+    ghCheckedOnceRef.current = true;
+    (async () => {
+      try {
+        const remote = await ghPullGist(ghToken, ghGistId);
+        if (remote && remote.lastModified && (!localLastModified || new Date(remote.lastModified) > new Date(localLastModified))) {
+          setGhPendingRemote(remote); // có bản mới hơn — chờ người dùng xác nhận, KHÔNG tự ghi đè
+        }
+      } catch (e) { setGhSyncMessage(e.message || "Không kiểm tra được bản đồng bộ mới nhất"); }
+    })();
+  }, [dataReady, ghToken, ghGistId, localLastModified]);
+
+  function applyPendingRemote() { if (ghPendingRemote) { applyPersistedState(JSON.stringify(ghPendingRemote)); setGhPendingRemote(null); } }
+  function dismissPendingRemote() { setGhPendingRemote(null); }
+  async function initGistSync(token) {
+    setGhSyncStatus("syncing"); setGhSyncMessage(null);
+    try {
+      const stateObj = { capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, lastModified: localLastModified || new Date().toISOString() };
+      const gist = await ghCreateGist(token, stateObj);
+      setGhToken(token); setGhGistId(gist.id); setGhSyncStatus("idle"); setGhLastSynced(stateObj.lastModified);
+    } catch (e) { setGhSyncStatus("error"); setGhSyncMessage(e.message || "Không tạo được đồng bộ mới"); }
+  }
+  async function linkExistingGist(token, gistId) {
+    setGhSyncStatus("syncing"); setGhSyncMessage(null);
+    try {
+      const remote = await ghPullGist(token, gistId);
+      setGhToken(token); setGhGistId(gistId);
+      if (remote) setGhPendingRemote(remote);
+      setGhSyncStatus("idle");
+    } catch (e) { setGhSyncStatus("error"); setGhSyncMessage(e.message || "Không kết nối được — kiểm tra lại token và Gist ID"); }
+  }
+  function disconnectSync() { setGhToken(""); setGhGistId(""); setGhPendingRemote(null); setGhSyncMessage(null); setGhSyncStatus("idle"); }
+  async function syncNow() {
+    if (!ghToken || !ghGistId) return;
+    setGhSyncStatus("syncing"); setGhSyncMessage(null);
+    try {
+      const remote = await ghPullGist(ghToken, ghGistId);
+      if (remote && remote.lastModified && (!localLastModified || new Date(remote.lastModified) > new Date(localLastModified))) {
+        setGhPendingRemote(remote);
+      } else {
+        const stateObj = { capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, lastModified: localLastModified };
+        await ghPushGist(ghToken, ghGistId, stateObj);
+        setGhLastSynced(localLastModified);
+      }
+      setGhSyncStatus("idle");
+    } catch (e) { setGhSyncStatus("error"); setGhSyncMessage(e.message || "Đồng bộ thất bại"); }
+  }
 
 
   useEffect(() => {
@@ -1092,6 +1214,14 @@ function CryptoTerminal() {
           <button className="tt-btn" onClick={() => setShowIOSHelp(false)} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 10px", color: C.textDim, fontSize: 12 }}>Đã hiểu</button>
         </div>
       )}
+      {ghPendingRemote && (
+        <div style={{ background: C.blueDim, borderBottom: `1px solid ${C.blue}`, padding: "10px 28px", fontSize: 13, color: C.blue, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <Icon name="refresh" size={15} />
+          <div style={{ flex: 1, minWidth: 200 }}><b>Phát hiện dữ liệu mới hơn từ thiết bị khác</b> (cập nhật lúc {new Date(ghPendingRemote.lastModified).toLocaleString("vi-VN")}) — áp dụng để đồng bộ?</div>
+          <button className="tt-btn" onClick={applyPendingRemote} style={{ background: C.blue, border: "none", borderRadius: 6, padding: "6px 14px", color: "#04101a", fontWeight: 700, fontSize: 12 }}>Áp dụng</button>
+          <button className="tt-btn" onClick={dismissPendingRemote} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 12px", color: C.textDim, fontSize: 12 }}>Bỏ qua</button>
+        </div>
+      )}
       {updateInfo && (
         <div style={{ background: C.amberDim, borderBottom: `1px solid ${C.amber}`, padding: "10px 28px", fontSize: 13, color: C.amber, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <Icon name="alert" size={15} />
@@ -1127,7 +1257,7 @@ function CryptoTerminal() {
         {tab === "overview" && <OverviewTab tickers={tickers} watchlist={watchlist} setWatchlist={setWatchlist} topVolume={topVolume} topVolBoll={topVolBoll} topVolBollScanning={topVolBollScanning} scanTop10Boll={scanTop10Boll} fng={fng} globalData={globalData} scanResults={scanResults} setTab={setTab} setCoinInput={setCoinInput} runAnalysis={runAnalysis} dayTradeResults={dayTradeResults} dayTradeScanning={dayTradeScanning} dayTradeError={dayTradeError} dayTradeDiag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} />}
         {tab === "action" && <ActionPlanTab coinInput={coinInput} setCoinInput={setCoinInput} runAnalysis={runAnalysis} analyzing={analyzing} analysis={analysis} analyzeError={analyzeError} scanResults={scanResults} capital={currentEquity} riskPct={riskPct} setRiskPct={setRiskPct} addTrade={addTrade} dayTradeResults={dayTradeResults} dayTradeScanning={dayTradeScanning} dayTradeError={dayTradeError} dayTradeDiag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} />}
         {tab === "backtest" && <BacktestTab btSymbol={btSymbol} setBtSymbol={setBtSymbol} btMonths={btMonths} setBtMonths={setBtMonths} btRunning={btRunning} btError={btError} btResult={btResult} runSingleBacktest={runSingleBacktest} runWatchlistBacktest={runWatchlistBacktest} currentEquity={currentEquity} />}
-        {tab === "portfolio" && <PortfolioTab capital={capital} setCapital={setCapital} trades={trades} closeTrade={closeTrade} deleteTrade={deleteTrade} currentEquity={currentEquity} winRate={winRate} openRisk={openRisk} equityCurve={equityCurve} realizedPnl={realizedPnl} tickers={tickers} exportBackup={exportBackup} importBackup={importBackup} persistMode={persistMode} />}
+        {tab === "portfolio" && <PortfolioTab capital={capital} setCapital={setCapital} trades={trades} closeTrade={closeTrade} deleteTrade={deleteTrade} currentEquity={currentEquity} winRate={winRate} openRisk={openRisk} equityCurve={equityCurve} realizedPnl={realizedPnl} tickers={tickers} exportBackup={exportBackup} importBackup={importBackup} persistMode={persistMode} ghToken={ghToken} ghGistId={ghGistId} ghSyncStatus={ghSyncStatus} ghSyncMessage={ghSyncMessage} ghLastSynced={ghLastSynced} initGistSync={initGistSync} linkExistingGist={linkExistingGist} syncNow={syncNow} disconnectSync={disconnectSync} />}
         {tab === "goals" && <GoalsTab capital={capital} setCapital={setCapital} currentEquity={currentEquity} trades={trades} goalBigTarget={goalBigTarget} setGoalBigTarget={setGoalBigTarget} goalMonthlyPct={goalMonthlyPct} setGoalMonthlyPct={setGoalMonthlyPct} goalAdjustments={goalAdjustments} addGoalAdjustment={addGoalAdjustment} deleteGoalAdjustment={deleteGoalAdjustment} goalMonths={goalMonths} addGoalMonth={addGoalMonth} removeGoalMonth={removeGoalMonth} />}
       </div>
       <div style={{ textAlign: "center", padding: "18px", fontSize: 11, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace" }}>Spot Terminal {VERSION} · dữ liệu từ Binance / CoinGecko / Alternative.me</div>
@@ -1602,7 +1732,12 @@ function ActionPlanTab({ coinInput, setCoinInput, runAnalysis, analyzing, analys
   );
 }
 
-function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, currentEquity, winRate, openRisk, equityCurve, realizedPnl, tickers, exportBackup, importBackup, persistMode }) {
+function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, currentEquity, winRate, openRisk, equityCurve, realizedPnl, tickers, exportBackup, importBackup, persistMode, ghToken, ghGistId, ghSyncStatus, ghSyncMessage, ghLastSynced, initGistSync, linkExistingGist, syncNow, disconnectSync }) {
+  const [showGhSetup, setShowGhSetup] = useState(false);
+  const [ghSetupMode, setGhSetupMode] = useState("new"); // 'new' | 'link'
+  const [ghTokenInput, setGhTokenInput] = useState("");
+  const [ghGistIdInput, setGhGistIdInput] = useState("");
+  const [showGistId, setShowGistId] = useState(false);
   const fileInputRef = useRef(null);
   const [editingCapital, setEditingCapital] = useState(false);
   const [capitalInput, setCapitalInput] = useState(capital);
@@ -1668,6 +1803,62 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
           <input ref={fileInputRef} type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => { if (e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ""; }} />
           <button className="tt-btn" onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "9px 14px", color: C.text, fontWeight: 600, fontSize: 13 }}>Khôi phục từ file</button>
         </div>
+      </Card>
+
+      <Card>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+          <SectionLabel>Đồng bộ nhiều thiết bị (GitHub Gist)</SectionLabel>
+          {ghToken && ghGistId && (
+            <Pill tone={ghSyncStatus === "error" ? "bear" : ghSyncStatus === "syncing" ? "amber" : "bull"}>
+              {ghSyncStatus === "syncing" ? "Đang đồng bộ..." : ghSyncStatus === "error" ? "Lỗi đồng bộ" : `Đã đồng bộ${ghLastSynced ? " · " + new Date(ghLastSynced).toLocaleTimeString("vi-VN") : ""}`}
+            </Pill>
+          )}
+        </div>
+
+        {!ghToken || !ghGistId ? (
+          <>
+            <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 12, lineHeight: 1.6 }}>
+              Dùng chính tài khoản GitHub bạn đã có để tự động đồng bộ vốn/lệnh/mục tiêu giữa nhiều thiết bị (máy tính + điện thoại), thay vì mỗi máy giữ 1 bản riêng. Dữ liệu lưu ở 1 <b>Gist bí mật</b> (không công khai) — không phải trong repo GitHub Pages.
+            </div>
+            {!showGhSetup ? (
+              <button className="tt-btn" onClick={() => setShowGhSetup(true)} style={{ background: "transparent", border: `1px dashed ${C.borderLight}`, borderRadius: 6, color: C.textDim, fontSize: 12, padding: "6px 14px" }}>+ Thiết lập đồng bộ</button>
+            ) : (
+              <div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <button className="tt-btn" onClick={() => setGhSetupMode("new")} style={{ background: ghSetupMode === "new" ? C.blue : C.surface2, color: ghSetupMode === "new" ? "#04101a" : C.textDim, border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600 }}>Thiết bị đầu tiên (tạo mới)</button>
+                  <button className="tt-btn" onClick={() => setGhSetupMode("link")} style={{ background: ghSetupMode === "link" ? C.blue : C.surface2, color: ghSetupMode === "link" ? "#04101a" : C.textDim, border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600 }}>Thiết bị thứ 2+ (liên kết)</button>
+                </div>
+                <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 10, lineHeight: 1.6 }}>
+                  1. Vào <b>github.com/settings/tokens</b> → Generate new token (classic) → chỉ tick quyền <b>gist</b> → Generate → copy token (chỉ hiện 1 lần).<br />
+                  {ghSetupMode === "new" ? "2. Dán token vào đây, bấm Tạo — dùng lại đúng token này ở các thiết bị khác." : "2. Dán token VÀ Gist ID lấy từ thiết bị đầu tiên (xem ở mục bên dưới sau khi thiết lập) vào đây."}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input type="password" value={ghTokenInput} onChange={(e) => setGhTokenInput(e.target.value)} placeholder="Dán GitHub token (ghp_...)" style={{ flex: 1, minWidth: 220, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "8px 10px", color: C.text, fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5 }} />
+                  {ghSetupMode === "link" && (
+                    <input value={ghGistIdInput} onChange={(e) => setGhGistIdInput(e.target.value)} placeholder="Gist ID" style={{ width: 160, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "8px 10px", color: C.text, fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5 }} />
+                  )}
+                  <button className="tt-btn" disabled={!ghTokenInput || (ghSetupMode === "link" && !ghGistIdInput)}
+                    onClick={() => { if (ghSetupMode === "new") initGistSync(ghTokenInput); else linkExistingGist(ghTokenInput, ghGistIdInput); setShowGhSetup(false); setGhTokenInput(""); setGhGistIdInput(""); }}
+                    style={{ background: C.blue, opacity: (!ghTokenInput || (ghSetupMode === "link" && !ghGistIdInput)) ? 0.4 : 1, border: "none", borderRadius: 6, padding: "8px 16px", color: "#04101a", fontWeight: 700, fontSize: 13 }}>
+                    {ghSetupMode === "new" ? "Tạo đồng bộ" : "Kết nối"}
+                  </button>
+                  <button className="tt-btn" onClick={() => setShowGhSetup(false)} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, padding: "8px 12px", color: C.textDim, fontSize: 12.5 }}>Hủy</button>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 11.5, color: C.amber }}>Lưu ý bảo mật: token này cho phép đọc/ghi Gist của bạn — chỉ dán vào thiết bị bạn tin tưởng, không chia sẻ, không dán vào file sao lưu.</div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+              <button className="tt-btn" onClick={syncNow} disabled={ghSyncStatus === "syncing"} style={{ background: C.blue, opacity: ghSyncStatus === "syncing" ? 0.5 : 1, border: "none", borderRadius: 6, padding: "8px 16px", color: "#04101a", fontWeight: 700, fontSize: 13 }}>Đồng bộ ngay</button>
+              <button className="tt-btn" onClick={() => setShowGistId(!showGistId)} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, padding: "8px 12px", color: C.textDim, fontSize: 12.5 }}>{showGistId ? "Ẩn" : "Xem"} Gist ID (để nối thiết bị khác)</button>
+              <button className="tt-btn" onClick={disconnectSync} style={{ background: "transparent", border: `1px solid ${C.bear}`, borderRadius: 6, padding: "8px 12px", color: C.bear, fontSize: 12.5 }}>Ngắt đồng bộ</button>
+            </div>
+            {showGistId && <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, background: C.surface2, padding: "8px 10px", borderRadius: 6, color: C.text, marginBottom: 8, wordBreak: "break-all" }}>Gist ID: {ghGistId}</div>}
+            {ghSyncMessage && <div style={{ fontSize: 12.5, color: C.bear }}>{ghSyncMessage}</div>}
+          </div>
+        )}
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 14 }}>

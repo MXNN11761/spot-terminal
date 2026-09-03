@@ -1,4 +1,4 @@
 {
-  "version": "v2.0",
-  "notes": "Bat dau dinh dang phien ban v2.x. Them banner chay chu noi bat o dinh trang (sticky, tren ca header): 'Tha khong co them loi nhuan con hon am nhung gi dang co'."
+  "version": "v2.1",
+  "notes": "Them dong bo nhieu thiet bi qua GitHub Gist bi mat: tu dong day len sau moi thay doi, tu kiem tra ban moi hon khi mo app (khong bao gio tu ghi de, luon hoi truoc). Token GitHub tach rieng khoi du lieu, khong bao gio nam trong file sao luu."
 }
