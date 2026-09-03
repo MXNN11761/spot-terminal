@@ -84,7 +84,7 @@
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback, useRef } = React;
-const VERSION = "v2.1";
+const VERSION = "v2.2";
 
 /* ============================== ICONS (SVG thuần, không phụ thuộc thư viện) ============================== */
 function Icon({ name, size = 14, color = "currentColor" }) {
@@ -1750,11 +1750,12 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
     const tk = tickers[sym];
     const curPrice = tk ? +tk.lastPrice : null;
     const floatingPct = curPrice != null ? ((curPrice - t.entry) / t.entry) * 100 : null;
+    const floatingAmount = curPrice != null ? (curPrice - t.entry) * t.qty : null;
     const daysHeld = t.openedAt ? (Date.now() - new Date(t.openedAt).getTime()) / 86400000 : null;
     const stopBreached = curPrice != null && curPrice <= t.stop;
     const heldTooLong = daysHeld != null && daysHeld > MAX_HOLD_DAYS;
     const maxLossPct = t.minPriceSeen != null ? ((t.minPriceSeen - t.entry) / t.entry) * 100 : null;
-    return { curPrice, floatingPct, daysHeld, stopBreached, heldTooLong, maxLossPct };
+    return { curPrice, floatingPct, floatingAmount, daysHeld, stopBreached, heldTooLong, maxLossPct };
   }
 
   const needsAttention = openTrades.filter((t) => { const li = getLiveInfo(t); return li.stopBreached || (li.heldTooLong && li.floatingPct < 0); });
@@ -1905,7 +1906,7 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
                     <span style={{ color: C.bear }}>Stop {usd(t.stop)}</span>
                     <span style={{ color: C.bull }}>Target {usd(t.target)}</span>
                     <span style={{ color: C.textDim }}>Qty {fmt(t.qty, 5)}</span>
-                    {li.curPrice != null && <span style={{ color: li.floatingPct >= 0 ? C.bull : C.bear }}>Hiện tại {usd(li.curPrice)} ({li.floatingPct >= 0 ? "+" : ""}{li.floatingPct.toFixed(2)}%)</span>}
+                    {li.curPrice != null && <span style={{ color: li.floatingPct >= 0 ? C.bull : C.bear }}>Hiện tại {usd(li.curPrice)} ({li.floatingPct >= 0 ? "+" : ""}{li.floatingPct.toFixed(2)}% · {li.floatingAmount >= 0 ? "+" : ""}{usd(li.floatingAmount)})</span>}
                     {li.daysHeld != null && <span style={{ color: C.textFaint }}>Đã giữ {formatDuration(li.daysHeld * 1440)}{t.estHoldMinutes != null && ` / dự kiến ${formatDuration(t.estHoldMinutes)}`}</span>}
                     {li.maxLossPct != null && li.maxLossPct < 0 && <span style={{ color: C.textFaint }}>Lỗ sâu nhất từng chạm: {li.maxLossPct.toFixed(2)}%</span>}
                   </div>

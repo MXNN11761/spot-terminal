@@ -1,4 +1,4 @@
 {
-  "version": "v2.1",
-  "notes": "Them dong bo nhieu thiet bi qua GitHub Gist bi mat: tu dong day len sau moi thay doi, tu kiem tra ban moi hon khi mo app (khong bao gio tu ghi de, luon hoi truoc). Token GitHub tach rieng khoi du lieu, khong bao gio nam trong file sao luu."
+  "version": "v2.2",
+  "notes": "Dong 'Hien tai' cua lenh dang mo gio hien them so tien lai/lo dang co (vd +0.80% * +$34.95), khong chi rieng %."
 }
