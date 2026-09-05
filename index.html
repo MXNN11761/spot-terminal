@@ -84,7 +84,7 @@
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback, useRef } = React;
-const VERSION = "v2.2";
+const VERSION = "v2.5";
 
 /* ============================== ICONS (SVG thuần, không phụ thuộc thư viện) ============================== */
 function Icon({ name, size = 14, color = "currentColor" }) {
@@ -104,6 +104,7 @@ function Icon({ name, size = 14, color = "currentColor" }) {
     activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />,
     arrow: <><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></>,
     plus: <><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>,
+    x: <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>,
   };
   return <svg {...common}>{paths[name]}</svg>;
 }
@@ -256,6 +257,116 @@ function detectCandlePattern(opens, highs, lows, closes, i) {
   if (body <= 0.1 * range) return { name: "Doji — thị trường lưỡng lự (không tính điểm)", score: 0 };
   return null;
 }
+
+/* v2.3: Ô TRA CỨU NHANH — đây KHÔNG phải AI/chat hiểu ngôn ngữ tự nhiên thật. Đây là bộ nhận diện mẫu
+   câu cố định (pattern-matching) ánh xạ sang các lệnh gọi API thật (Binance/OKX). Câu hỏi ngoài các mẫu
+   dưới đây sẽ không nhận diện được — tool nói rõ điều này thay vì giả vờ hiểu. */
+const QUICK_COIN_NAME_MAP = {
+  "bitcoin": "BTC", "ethereum": "ETH", "binance coin": "BNB", "bnb": "BNB", "solana": "SOL",
+  "ripple": "XRP", "xrp": "XRP", "cardano": "ADA", "dogecoin": "DOGE", "zcash": "ZEC",
+  "litecoin": "LTC", "polkadot": "DOT", "avalanche": "AVAX", "chainlink": "LINK", "polygon": "MATIC",
+  "tron": "TRX", "shiba inu": "SHIB", "uniswap": "UNI", "cosmos": "ATOM", "stellar": "XLM",
+  "ethereum classic": "ETC", "filecoin": "FIL", "aptos": "APT", "arbitrum": "ARB", "optimism": "OP",
+  "near protocol": "NEAR", "near": "NEAR", "sui": "SUI", "injective": "INJ", "toncoin": "TON",
+  "internet computer": "ICP", "hedera": "HBAR", "bitcoin cash": "BCH",
+};
+const QUICK_STOPWORDS = new Set(["của", "trên", "gia", "giá", "khối", "khoi", "lượng", "luong", "giao", "dịch", "dich",
+  "danh", "sách", "sach", "coin", "top", "tăng", "tang", "giảm", "giam", "nhanh", "nhất", "nhat", "ngày", "ngay",
+  "binance", "okx", "và", "va", "là", "la", "cho", "bao", "nhiêu", "nhieu", "hôm", "hom", "nay", "hiện", "hien",
+  "tại", "tai", "the", "in", "on", "of", "price", "volume", "list", "đồng", "dong", "các", "cac", "những", "nhung",
+  "24h", "gần", "gan", "đây", "day", "biến", "bien", "động", "dong2", "trong", "24", "giờ", "gio", "nào", "nao"]);
+
+function quickDetectExchange(lower) { return /okx/.test(lower) ? "OKX" : "BINANCE"; }
+function quickExtractCount(lower) { const m = lower.match(/\d+/); return m ? Math.min(20, Math.max(1, parseInt(m[0], 10))) : 10; }
+function quickExtractSymbol(rawQ) {
+  const lower = rawQ.toLowerCase();
+  for (const name in QUICK_COIN_NAME_MAP) { if (lower.includes(name)) return QUICK_COIN_NAME_MAP[name]; }
+  const tokens = rawQ.split(/\s+/).map((t) => t.replace(/[^a-zA-Z0-9]/g, ""));
+  for (const t of tokens) {
+    if (t.length >= 2 && t.length <= 10 && /^[a-zA-Z]+$/.test(t) && !QUICK_STOPWORDS.has(t.toLowerCase())) return t.toUpperCase();
+  }
+  return null;
+}
+function parseQuickQuery(rawQ) {
+  const q = rawQ.trim();
+  if (!q) return null;
+  const lower = q.toLowerCase();
+  const exchange = quickDetectExchange(lower);
+  const isTopList = /(top|danh sách|danh sach)/.test(lower) && /(tăng|tang|giảm|giam)/.test(lower);
+  const isTopVolume = /(khối lượng|khoi luong)/.test(lower) && /(lớn nhất|lon nhat|top|danh sách|danh sach)/.test(lower);
+  const isVolume = /(khối lượng|khoi luong|volume|thanh khoản|thanh khoan)/.test(lower);
+  const isPrice = /\bgiá\b|\bgia\b/.test(lower);
+  if (isTopList) {
+    const direction = /giảm|giam/.test(lower) && !/tăng|tang/.test(lower) ? "loser" : "gainer";
+    return { type: "toplist", exchange, count: quickExtractCount(lower), direction };
+  }
+  if (isTopVolume) return { type: "topvolume", exchange, count: quickExtractCount(lower) };
+  if (isVolume) { const symbol = quickExtractSymbol(q); return symbol ? { type: "volume", exchange, symbol } : { type: "unknown" }; }
+  if (isPrice) { const symbol = quickExtractSymbol(q); return symbol ? { type: "price", exchange, symbol } : { type: "unknown" }; }
+  return { type: "unknown" };
+}
+const QUICK_HELP_TEXT = `Mình chưa nhận diện được câu hỏi này (tool chỉ nhận mẫu câu cố định, không phải AI hiểu tự do). Thử theo mẫu:
+• "Khối lượng của BTC trên Binance"
+• "Giá ETH trên OKX"
+• "Top 10 coin tăng giá nhanh nhất 24h trên Binance"
+• "Danh sách coin giảm giá nhiều nhất trên OKX"
+• "Top 10 khối lượng lớn nhất trên OKX"`;
+async function executeQuickQuery(parsed) {
+  if (!parsed || parsed.type === "unknown") return QUICK_HELP_TEXT;
+  try {
+    if (parsed.type === "volume" || parsed.type === "price") {
+      if (parsed.exchange === "OKX") {
+        const t = await fetchOkxTicker(`${parsed.symbol}-USDT`);
+        const last = +t.last, open = +t.open24h, vol = +t.volCcy24h;
+        const pct = open ? ((last - open) / open) * 100 : null;
+        const pctText = pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}% 24h)` : "";
+        return parsed.type === "volume"
+          ? `${parsed.symbol}/USDT trên OKX — Khối lượng 24h: ${usd(vol / 1e6)}M USDT. Giá hiện tại: ${usd(last)}${pctText}.`
+          : `${parsed.symbol}/USDT trên OKX — Giá hiện tại: ${usd(last)}${pctText}. Khối lượng 24h: ${usd(vol / 1e6)}M USDT.`;
+      } else {
+        const sym = parsed.symbol.endsWith("USDT") ? parsed.symbol : parsed.symbol + "USDT";
+        const t = await fetchSingleTicker24hr(sym);
+        const last = +t.lastPrice, pct = +t.priceChangePercent, vol = +t.quoteVolume;
+        return parsed.type === "volume"
+          ? `${parsed.symbol}/USDT trên Binance — Khối lượng 24h: ${usd(vol / 1e6)}M USDT. Giá hiện tại: ${usd(last)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}% 24h).`
+          : `${parsed.symbol}/USDT trên Binance — Giá hiện tại: ${usd(last)} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}% 24h). Khối lượng 24h: ${usd(vol / 1e6)}M USDT.`;
+      }
+    }
+    if (parsed.type === "topvolume") {
+      if (parsed.exchange === "OKX") {
+        const all = await fetchOkxAllTickers();
+        const list = all.filter((t) => t.instId.endsWith("-USDT")).sort((a, b) => +b.volCcy24h - +a.volCcy24h).slice(0, parsed.count);
+        return `Top ${parsed.count} khối lượng lớn nhất trên OKX (24h):\n` + list.map((t, i) => `${i + 1}. ${t.instId.replace("-USDT", "")} — Vol ${usd(+t.volCcy24h / 1e6)}M USDT`).join("\n");
+      } else {
+        const top = await fetchTop10Volume();
+        const list = top.slice(0, parsed.count);
+        return `Top ${parsed.count} khối lượng lớn nhất trên Binance (24h):\n` + list.map((t, i) => `${i + 1}. ${t.symbol.replace("USDT", "")} — Vol ${usd(t.quoteVolume / 1e6)}M USDT`).join("\n");
+      }
+    }
+    if (parsed.type === "toplist") {
+      const dirLabel = parsed.direction === "gainer" ? "tăng" : "giảm";
+      if (parsed.exchange === "OKX") {
+        const all = await fetchOkxAllTickers();
+        const withPct = all.filter((t) => t.instId.endsWith("-USDT") && +t.volCcy24h > 100000)
+          .map((t) => { const last = +t.last, open = +t.open24h; return { symbol: t.instId.replace("-USDT", ""), pct: open ? ((last - open) / open) * 100 : 0 }; });
+        withPct.sort((a, b) => (parsed.direction === "gainer" ? b.pct - a.pct : a.pct - b.pct));
+        const list = withPct.slice(0, parsed.count);
+        return `Top ${parsed.count} coin ${dirLabel} giá mạnh nhất 24h trên OKX:\n` + list.map((t, i) => `${i + 1}. ${t.symbol} — ${t.pct >= 0 ? "+" : ""}${t.pct.toFixed(2)}%`).join("\n");
+      } else {
+        const res = await fetch("https://api.binance.com/api/v3/ticker/24hr");
+        if (!res.ok) throw new Error(`Binance lỗi ${res.status}`);
+        const raw = await res.json();
+        const withPct = raw.filter((t) => t.symbol.endsWith("USDT") && !STABLE_OR_LEVERAGED_RE.test(t.symbol) && +t.quoteVolume > 100000)
+          .map((t) => ({ symbol: t.symbol.replace("USDT", ""), pct: +t.priceChangePercent }));
+        withPct.sort((a, b) => (parsed.direction === "gainer" ? b.pct - a.pct : a.pct - b.pct));
+        const list = withPct.slice(0, parsed.count);
+        return `Top ${parsed.count} coin ${dirLabel} giá mạnh nhất 24h trên Binance:\n` + list.map((t, i) => `${i + 1}. ${t.symbol} — ${t.pct >= 0 ? "+" : ""}${t.pct.toFixed(2)}%`).join("\n");
+      }
+    }
+  } catch (e) { return `Lỗi khi tra cứu: ${e.message || "không rõ nguyên nhân"}. Kiểm tra lại tên coin hoặc thử lại.`; }
+  return QUICK_HELP_TEXT;
+}
+
 function atrCalc(highs, lows, closes, period = 14) {
   const tr = highs.map((h, i) => {
     if (i === 0) return h - lows[i];
@@ -360,6 +471,20 @@ async function fetchTop10Volume() {
     .slice(0, 30)
     .map((t) => ({ symbol: t.symbol, quoteVolume: +t.quoteVolume, priceChangePercent: +t.priceChangePercent, lastPrice: +t.lastPrice, highPrice: +t.highPrice, lowPrice: +t.lowPrice }));
 }
+// v2.3: tích hợp OKX (chỉ dùng cho ô tra cứu nhanh — chưa dùng cho tín hiệu/backtest chính của tool).
+async function fetchOkxTicker(instId) {
+  const res = await fetch(`https://www.okx.com/api/v5/market/ticker?instId=${instId}`);
+  if (!res.ok) throw new Error(`OKX ticker lỗi ${res.status}`);
+  const json = await res.json();
+  if (!json.data || !json.data[0]) throw new Error(`Không tìm thấy ${instId} trên OKX`);
+  return json.data[0];
+}
+async function fetchOkxAllTickers() {
+  const res = await fetch(`https://www.okx.com/api/v5/market/tickers?instType=SPOT`);
+  if (!res.ok) throw new Error(`OKX tickers lỗi ${res.status}`);
+  const json = await res.json();
+  return json.data || [];
+}
 async function fetchFearGreed() {
   const res = await fetch("https://api.alternative.me/fng/?limit=1");
   if (!res.ok) throw new Error("Fear&Greed lỗi");
@@ -461,7 +586,8 @@ function analyzeSymbol(klines) {
 
   const entry = price;
   let stop = null, target = null, risk = null, reward = null, rr = null, pctTarget = null, pctStop = null, estHoldBars = null;
-  if (direction === "LONG") {
+  const isReferenceOnly = direction === "TRUNG LẬP"; // v2.3: TRUNG LẬP vẫn hiện số liệu nhưng gắn cờ "chỉ tham khảo"
+  if (direction === "LONG" || direction === "TRUNG LẬP") {
     // v1.3: chọn stop XA hơn (an toàn hơn) giữa cấu trúc hỗ trợ và ATR — tránh bị quét bởi nhiễu giá ngắn hạn.
     // Giới hạn khoảng cách rủi ro trong 0.8%-3% giá để R:R tối thiểu 1:2.2 luôn khả thi trong mức trần mục tiêu.
     const atrStop = entry - 1.0 * curAtr;
@@ -492,7 +618,7 @@ function analyzeSymbol(klines) {
   // hiển thị số cho hướng không giao dịch được sẽ gây hiểu nhầm (đây chính là lỗi đã xảy ra ở v1.4: target < entry
   // dù nhãn ghi "chốt lời"). Khi không phải LONG, stop/target/rr trả về null để giao diện tự ẩn đúng cách.
 
-  return { price, score, momentumCore, overheated, confidence, direction, reasons, entry, stop, target, rr, pctTarget, pctStop, support, resistance, curRsi, volRatio, curAtr, estHoldBars };
+  return { price, score, momentumCore, overheated, confidence, direction, reasons, entry, stop, target, rr, pctTarget, pctStop, support, resistance, curRsi, volRatio, curAtr, estHoldBars, isReferenceOnly };
 }
 
 /* ============================== BACKTEST ENGINE ==============================
@@ -709,8 +835,9 @@ function CryptoTerminal() {
   const [goalAdjustments, setGoalAdjustments] = useState([]); // {id, amount, date, note} — rót thủ công ngoài lệnh đã ghi nhận trong tool
   const [goalMonths, setGoalMonths] = useState(() => {
     const d = new Date();
-    return [`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`];
-  }); // danh sách "YYYY-MM" các ống tháng đang hiển thị — người dùng tự thêm/xóa
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    return [{ key, targetPct: 30 }];
+  }); // {key:"YYYY-MM", targetPct}[] — mỗi ống tháng có mục tiêu % riêng, người dùng tự thêm/xóa
   const [trades, setTrades] = useState([]);
   const [dataReady, setDataReady] = useState(false);
   const [persistMode, setPersistMode] = useState("checking"); // 'cloud' | 'local' | 'none' | 'checking'
@@ -747,7 +874,11 @@ function CryptoTerminal() {
       if (parsed.goalBigTarget != null) setGoalBigTarget(parsed.goalBigTarget);
       if (parsed.goalMonthlyPct != null) setGoalMonthlyPct(parsed.goalMonthlyPct);
       if (parsed.goalAdjustments) setGoalAdjustments(parsed.goalAdjustments);
-      if (parsed.goalMonths) setGoalMonths(parsed.goalMonths);
+      if (parsed.goalMonths) {
+        const defaultPct = parsed.goalMonthlyPct != null ? parsed.goalMonthlyPct : 30;
+        const converted = parsed.goalMonths.map((m) => (typeof m === "string" ? { key: m, targetPct: defaultPct } : m));
+        setGoalMonths(converted);
+      }
       if (parsed.lastModified) setLocalLastModified(parsed.lastModified);
     } catch (e) {}
   }
@@ -1021,18 +1152,35 @@ function CryptoTerminal() {
   // (rẻ, không tốn API) rồi mới gọi nến 15m để xác nhận tín hiệu — chỉ giữ lại LONG (loại TRUNG LẬP vì
   // không dùng để giao dịch được).
   const [dayTradeResults, setDayTradeResults] = useState([]);
+  const [dayTradeTier2, setDayTradeTier2] = useState([]);
   const [dayTradeScanning, setDayTradeScanning] = useState(false);
   const [dayTradeError, setDayTradeError] = useState(null);
   const [dayTradeDiag, setDayTradeDiag] = useState(null); // { poolSize, inRangeCount, checkedCount, nearMiss: [...] }
   const [includeBreakout, setIncludeBreakout] = useState(false);
   const [rangeMin, setRangeMin] = useState(5);
   const [rangeMax, setRangeMax] = useState(10);
+  const [minTargetPct, setMinTargetPct] = useState(2);
   const [scanInterval, setScanInterval] = useState("15m");
   const [plannedCapital, setPlannedCapital] = useState(100);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIOSHelp, setShowIOSHelp] = useState(false);
   const [installDismissed, setInstallDismissed] = useState(false);
+  const [quickChatOpen, setQuickChatOpen] = useState(false);
+  const [quickChatInput, setQuickChatInput] = useState("");
+  const [quickChatMessages, setQuickChatMessages] = useState([]);
+  const [quickChatLoading, setQuickChatLoading] = useState(false);
+  async function handleQuickAsk() {
+    const q = quickChatInput.trim();
+    if (!q || quickChatLoading) return;
+    setQuickChatMessages((prev) => [...prev, { role: "user", text: q }]);
+    setQuickChatInput("");
+    setQuickChatLoading(true);
+    const parsed = parseQuickQuery(q);
+    const answer = await executeQuickQuery(parsed);
+    setQuickChatMessages((prev) => [...prev, { role: "tool", text: answer }]);
+    setQuickChatLoading(false);
+  }
 
   const scanDayTrade = useCallback(async () => {
     setDayTradeScanning(true); setDayTradeError(null);
@@ -1048,38 +1196,64 @@ function CryptoTerminal() {
         .map((t) => ({ ...t, rangePct: ((t.highPrice - t.lowPrice) / t.lastPrice) * 100 }))
         .filter((t) => t.rangePct >= rangeMin && t.rangePct <= rangeMax);
 
+      // v2.5: quét ĐỒNG THỜI nhiều khung thời gian (15m/1h/4h) cho mỗi coin thay vì chỉ 1 khung —
+      // tăng cơ hội tìm thấy tín hiệu thật mỗi ngày mà KHÔNG hạ ngưỡng LONG ở bất kỳ khung nào.
+      // Lấy kết quả điểm cao nhất trong 3 khung để đại diện cho coin đó, ghi rõ khung nào đã kích hoạt.
+      const TIMEFRAMES_TO_SCAN = ["15m", "1h", "4h"];
       const allChecked = [];
       for (const c of candidates) {
-        try {
-          const klines = await fetchBinanceKlines(c.symbol, scanInterval, 150);
-          const r = analyzeSymbol(klines);
-          if (r) {
-            const estHoldMinutes = r.estHoldBars != null ? r.estHoldBars * (INTERVAL_MINUTES[scanInterval] || 15) : null;
-            allChecked.push({ ...c, ...r, symbol: c.symbol, interval: scanInterval, estHoldMinutes });
-          }
-        } catch (e) { /* bỏ qua coin lỗi, không chặn cả danh sách */ }
+        let best = null;
+        for (const tf of TIMEFRAMES_TO_SCAN) {
+          try {
+            const klines = await fetchBinanceKlines(c.symbol, tf, 150);
+            const r = analyzeSymbol(klines);
+            if (!r) continue;
+            const estHoldMinutes = r.estHoldBars != null ? r.estHoldBars * (INTERVAL_MINUTES[tf] || 15) : null;
+            const candidateResult = { ...c, ...r, symbol: c.symbol, interval: tf, estHoldMinutes };
+            if (!best || candidateResult.score > best.score) best = candidateResult;
+          } catch (e) { /* bỏ qua khung lỗi cho coin này, không chặn cả lượt quét */ }
+        }
+        if (best) allChecked.push(best);
       }
-      const longs = allChecked.filter((r) => r.direction === "LONG");
+
+      // v2.5: lọc thêm theo đúng mục tiêu lợi nhuận tối thiểu (mặc định 2%) — không hạ chuẩn điểm số,
+      // chỉ đảm bảo coin lọt vào danh sách THẬT SỰ có target đủ lớn theo đúng yêu cầu của người dùng.
+      const longs = allChecked.filter((r) => r.direction === "LONG" && r.pctTarget != null && r.pctTarget >= minTargetPct);
       const breakouts = allChecked.filter((r) => r.direction.includes("NÓNG"));
       let final = includeBreakout ? [...longs, ...breakouts] : longs;
       final.sort((a, b) => b.quoteVolume - a.quoteVolume);
       final = final.slice(0, 5);
 
-      // v1.23: chỉ tính chu kỳ BOLL (khung 1H riêng, không phụ thuộc scanInterval) cho tối đa 5 coin
-      // lọt vào danh sách cuối — giữ chi phí gọi API ở mức thấp thay vì tính cho toàn bộ candidates.
-      for (const r of final) {
-        try {
-          const klines1h = await fetchBinanceKlines(r.symbol, "1h", 200);
-          r.bollCycle = computeBollCycleStats(klines1h);
-        } catch (e) { r.bollCycle = null; }
+      // v2.5: hạng "Khá" — điểm 2.5-3.5 (chưa đạt ngưỡng LONG ≥3.5) nhưng vẫn đạt target tối thiểu —
+      // hiển thị MINH BẠCH, tách riêng, ghi rõ độ tin cậy thấp hơn, để người dùng TỰ quyết định thay vì
+      // tool âm thầm ẩn đi mọi thứ dưới ngưỡng.
+      const tier2 = allChecked
+        .filter((r) => r.direction === "TRUNG LẬP" && r.score >= 2.5 && r.score < 3.5 && r.pctTarget != null && r.pctTarget >= minTargetPct)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+
+      // v1.23/v2.3: chu kỳ BOLL 1H cố định + khung đã kích hoạt tín hiệu (song song) — chỉ tính cho
+      // các coin lọt vào 2 danh sách cuối, giữ chi phí gọi API thấp.
+      async function attachBollCycles(list) {
+        for (const r of list) {
+          try {
+            const klines1h = await fetchBinanceKlines(r.symbol, "1h", 200);
+            r.bollCycle1h = computeBollCycleStats(klines1h);
+            if (r.interval === "1h") { r.bollCycleScan = r.bollCycle1h; }
+            else { try { const klinesScan = await fetchBinanceKlines(r.symbol, r.interval, 200); r.bollCycleScan = computeBollCycleStats(klinesScan); } catch (e2) { r.bollCycleScan = null; } }
+          } catch (e) { r.bollCycle1h = null; r.bollCycleScan = null; }
+        }
       }
+      await attachBollCycles(final);
+      await attachBollCycles(tier2);
 
       const nearMiss = [...allChecked].filter((r) => r.direction !== "LONG").sort((a, b) => b.score - a.score).slice(0, 3);
       setDayTradeDiag({ poolSize: pool.length, inRangeCount: candidates.length, checkedCount: allChecked.length, longCount: longs.length, breakoutCount: breakouts.length, nearMiss });
       setDayTradeResults(final);
+      setDayTradeTier2(tier2);
     } catch (e) { setDayTradeError(e.message || "Lỗi quét danh sách giao dịch trong ngày."); }
     setDayTradeScanning(false);
-  }, [watchlist, topVolume, tickers, includeBreakout, rangeMin, rangeMax, scanInterval]);
+  }, [watchlist, topVolume, tickers, includeBreakout, rangeMin, rangeMax, minTargetPct]);
 
   useEffect(() => { if (topVolume.length > 0 && dayTradeResults.length === 0 && !dayTradeScanning) scanDayTrade(); }, [topVolume.length]); // eslint-disable-line
 
@@ -1152,8 +1326,13 @@ function CryptoTerminal() {
   function deleteTrade(id) { setTrades((prev) => prev.filter((t) => t.id !== id)); }
   function addGoalAdjustment(adj) { setGoalAdjustments((prev) => [{ id: Date.now(), ...adj }, ...prev]); }
   function deleteGoalAdjustment(id) { setGoalAdjustments((prev) => prev.filter((a) => a.id !== id)); }
-  function addGoalMonth(key) { setGoalMonths((prev) => (prev.includes(key) ? prev : [...prev, key].sort())); }
-  function removeGoalMonth(key) { setGoalMonths((prev) => prev.filter((k) => k !== key)); }
+  function pourTradeToGoal(trade) {
+    addGoalAdjustment({ amount: trade.pnl, date: trade.closedAt || new Date().toISOString(), note: `Lệnh ${trade.symbol} (${trade.source === "manual" ? "tự quyết định" : "hệ thống"})`, fromTradeId: trade.id });
+    setTrades((prev) => prev.map((t) => (t.id === trade.id ? { ...t, pouredToGoal: true } : t)));
+  }
+  function addGoalMonth(key, targetPct) { setGoalMonths((prev) => (prev.some((m) => m.key === key) ? prev : [...prev, { key, targetPct }].sort((a, b) => a.key.localeCompare(b.key)))); }
+  function removeGoalMonth(key) { setGoalMonths((prev) => prev.filter((m) => m.key !== key)); }
+  function editGoalMonthPct(key, targetPct) { setGoalMonths((prev) => prev.map((m) => (m.key === key ? { ...m, targetPct } : m))); }
 
   const realizedPnl = trades.filter((t) => t.status === "closed").reduce((a, t) => a + (t.pnl || 0), 0);
   const currentEquity = capital + realizedPnl;
@@ -1254,13 +1433,46 @@ function CryptoTerminal() {
       </div>
 
       <div style={{ padding: 28, maxWidth: 1180, margin: "0 auto" }}>
-        {tab === "overview" && <OverviewTab tickers={tickers} watchlist={watchlist} setWatchlist={setWatchlist} topVolume={topVolume} topVolBoll={topVolBoll} topVolBollScanning={topVolBollScanning} scanTop10Boll={scanTop10Boll} fng={fng} globalData={globalData} scanResults={scanResults} setTab={setTab} setCoinInput={setCoinInput} runAnalysis={runAnalysis} dayTradeResults={dayTradeResults} dayTradeScanning={dayTradeScanning} dayTradeError={dayTradeError} dayTradeDiag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} />}
-        {tab === "action" && <ActionPlanTab coinInput={coinInput} setCoinInput={setCoinInput} runAnalysis={runAnalysis} analyzing={analyzing} analysis={analysis} analyzeError={analyzeError} scanResults={scanResults} capital={currentEquity} riskPct={riskPct} setRiskPct={setRiskPct} addTrade={addTrade} dayTradeResults={dayTradeResults} dayTradeScanning={dayTradeScanning} dayTradeError={dayTradeError} dayTradeDiag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} />}
+        {tab === "overview" && <OverviewTab tickers={tickers} watchlist={watchlist} setWatchlist={setWatchlist} topVolume={topVolume} topVolBoll={topVolBoll} topVolBollScanning={topVolBollScanning} scanTop10Boll={scanTop10Boll} fng={fng} globalData={globalData} scanResults={scanResults} setTab={setTab} setCoinInput={setCoinInput} runAnalysis={runAnalysis} dayTradeResults={dayTradeResults} dayTradeTier2={dayTradeTier2} dayTradeScanning={dayTradeScanning} dayTradeError={dayTradeError} dayTradeDiag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} minTargetPct={minTargetPct} setMinTargetPct={setMinTargetPct} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} />}
+        {tab === "action" && <ActionPlanTab coinInput={coinInput} setCoinInput={setCoinInput} runAnalysis={runAnalysis} analyzing={analyzing} analysis={analysis} analyzeError={analyzeError} scanResults={scanResults} capital={currentEquity} riskPct={riskPct} setRiskPct={setRiskPct} addTrade={addTrade} dayTradeResults={dayTradeResults} dayTradeTier2={dayTradeTier2} dayTradeScanning={dayTradeScanning} dayTradeError={dayTradeError} dayTradeDiag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} minTargetPct={minTargetPct} setMinTargetPct={setMinTargetPct} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} />}
         {tab === "backtest" && <BacktestTab btSymbol={btSymbol} setBtSymbol={setBtSymbol} btMonths={btMonths} setBtMonths={setBtMonths} btRunning={btRunning} btError={btError} btResult={btResult} runSingleBacktest={runSingleBacktest} runWatchlistBacktest={runWatchlistBacktest} currentEquity={currentEquity} />}
-        {tab === "portfolio" && <PortfolioTab capital={capital} setCapital={setCapital} trades={trades} closeTrade={closeTrade} deleteTrade={deleteTrade} currentEquity={currentEquity} winRate={winRate} openRisk={openRisk} equityCurve={equityCurve} realizedPnl={realizedPnl} tickers={tickers} exportBackup={exportBackup} importBackup={importBackup} persistMode={persistMode} ghToken={ghToken} ghGistId={ghGistId} ghSyncStatus={ghSyncStatus} ghSyncMessage={ghSyncMessage} ghLastSynced={ghLastSynced} initGistSync={initGistSync} linkExistingGist={linkExistingGist} syncNow={syncNow} disconnectSync={disconnectSync} />}
-        {tab === "goals" && <GoalsTab capital={capital} setCapital={setCapital} currentEquity={currentEquity} trades={trades} goalBigTarget={goalBigTarget} setGoalBigTarget={setGoalBigTarget} goalMonthlyPct={goalMonthlyPct} setGoalMonthlyPct={setGoalMonthlyPct} goalAdjustments={goalAdjustments} addGoalAdjustment={addGoalAdjustment} deleteGoalAdjustment={deleteGoalAdjustment} goalMonths={goalMonths} addGoalMonth={addGoalMonth} removeGoalMonth={removeGoalMonth} />}
+        {tab === "portfolio" && <PortfolioTab capital={capital} setCapital={setCapital} trades={trades} closeTrade={closeTrade} deleteTrade={deleteTrade} currentEquity={currentEquity} winRate={winRate} openRisk={openRisk} equityCurve={equityCurve} realizedPnl={realizedPnl} tickers={tickers} exportBackup={exportBackup} importBackup={importBackup} persistMode={persistMode} ghToken={ghToken} ghGistId={ghGistId} ghSyncStatus={ghSyncStatus} ghSyncMessage={ghSyncMessage} ghLastSynced={ghLastSynced} initGistSync={initGistSync} linkExistingGist={linkExistingGist} syncNow={syncNow} disconnectSync={disconnectSync} pourTradeToGoal={pourTradeToGoal} setTab={setTab} />}
+        {tab === "goals" && <GoalsTab capital={capital} setCapital={setCapital} currentEquity={currentEquity} trades={trades} goalBigTarget={goalBigTarget} setGoalBigTarget={setGoalBigTarget} goalMonthlyPct={goalMonthlyPct} setGoalMonthlyPct={setGoalMonthlyPct} goalAdjustments={goalAdjustments} addGoalAdjustment={addGoalAdjustment} deleteGoalAdjustment={deleteGoalAdjustment} goalMonths={goalMonths} addGoalMonth={addGoalMonth} removeGoalMonth={removeGoalMonth} editGoalMonthPct={editGoalMonthPct} />}
       </div>
       <div style={{ textAlign: "center", padding: "18px", fontSize: 11, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace" }}>Spot Terminal {VERSION} · dữ liệu từ Binance / CoinGecko / Alternative.me</div>
+
+      <button className="tt-btn" onClick={() => setQuickChatOpen((v) => !v)} title="Tra cứu nhanh"
+        style={{ position: "fixed", bottom: 20, right: 20, zIndex: 30, width: 52, height: 52, borderRadius: "50%", background: `linear-gradient(135deg, ${C.blue}, ${C.bull})`, boxShadow: "0 0 18px rgba(91,141,239,0.5)", border: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Icon name={quickChatOpen ? "x" : "search"} size={22} color="#04101a" />
+      </button>
+
+      {quickChatOpen && (
+        <div style={{ position: "fixed", bottom: 82, right: 20, zIndex: 30, width: 340, maxWidth: "calc(100vw - 32px)", maxHeight: "60vh", display: "flex", flexDirection: "column", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, boxShadow: "0 0 0 1px rgba(91,141,239,0.08), 0 12px 40px rgba(0,0,0,0.5)", overflow: "hidden" }}>
+          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.border}`, background: C.surface2 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5 }}>Tra cứu nhanh</div>
+            <div style={{ fontSize: 11, color: C.textFaint, marginTop: 2 }}>Nhận diện theo mẫu câu cố định — không phải AI hiểu tự do. Nguồn: Binance, OKX.</div>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10, minHeight: 120 }}>
+            {quickChatMessages.length === 0 && (
+              <div style={{ fontSize: 12, color: C.textFaint, lineHeight: 1.6 }}>
+                Ví dụ bạn có thể hỏi:<br />
+                • "Khối lượng của BTC trên Binance"<br />
+                • "Giá ETH trên OKX"<br />
+                • "Top 10 coin tăng giá nhanh nhất 24h trên Binance"<br />
+                • "Danh sách coin giảm giá nhiều nhất trên OKX"
+              </div>
+            )}
+            {quickChatMessages.map((m, i) => (
+              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%", background: m.role === "user" ? C.blueDim : C.surface2, color: m.role === "user" ? C.blue : C.text, borderRadius: 10, padding: "8px 11px", fontSize: 12.5, whiteSpace: "pre-line", lineHeight: 1.5 }}>{m.text}</div>
+            ))}
+            {quickChatLoading && <div style={{ fontSize: 12, color: C.textFaint }}>Đang tra cứu...</div>}
+          </div>
+          <div style={{ display: "flex", gap: 6, padding: 10, borderTop: `1px solid ${C.border}` }}>
+            <input value={quickChatInput} onChange={(e) => setQuickChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleQuickAsk()} placeholder="Nhập câu hỏi..." style={{ flex: 1, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", color: C.text, fontSize: 12.5 }} />
+            <button className="tt-btn" onClick={handleQuickAsk} disabled={quickChatLoading || !quickChatInput.trim()} style={{ background: C.blue, opacity: (quickChatLoading || !quickChatInput.trim()) ? 0.4 : 1, border: "none", borderRadius: 8, padding: "8px 14px", color: "#04101a", fontWeight: 700, fontSize: 12.5 }}>Hỏi</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1268,24 +1480,66 @@ function CryptoTerminal() {
 /* v1.13: card gợi ý giao dịch trong ngày — DÙNG CHUNG cho cả tab Tổng quan và tab Kế hoạch hành động,
    để không còn tình trạng 2 tab hiện 2 danh sách khác nhau. Bấm "Phân tích" luôn khóa khung 15m —
    đúng khung đã dùng để lọc coin này vào danh sách, đảm bảo số liệu không bị lệch khi xem chi tiết. */
-function DayTradeCard({ results, scanning, error, scanDayTrade, setCoinInput, setTab, runAnalysis, onOverviewTab, diag, includeBreakout, setIncludeBreakout, rangeMin, setRangeMin, rangeMax, setRangeMax, scanInterval, setScanInterval, plannedCapital, setPlannedCapital }) {
-  const intervalLabel = BINANCE_INTERVALS.find((i) => i.value === scanInterval)?.label || scanInterval;
+function DayTradeCard({ results, tier2, scanning, error, scanDayTrade, setCoinInput, setTab, runAnalysis, onOverviewTab, diag, includeBreakout, setIncludeBreakout, rangeMin, setRangeMin, rangeMax, setRangeMax, minTargetPct, setMinTargetPct, scanInterval, setScanInterval, plannedCapital, setPlannedCapital }) {
+  function renderRow(t, idx, muted) {
+    const hasPlan = (t.direction === "LONG" || t.direction === "TRUNG LẬP") && t.pctTarget != null && t.pctStop != null;
+    const expectedProfit = hasPlan ? plannedCapital * (t.pctTarget / 100) : null;
+    const expectedLoss = hasPlan ? plannedCapital * (t.pctStop / 100) : null; // pctStop đã âm sẵn
+    return (
+      <div key={t.symbol} className="tt-row" style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px", borderRadius: 10, border: `1px solid ${muted ? C.amber + "55" : C.border}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <span style={{ width: 14, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{idx + 1}</span>
+            <b style={{ fontSize: 15 }}>{t.symbol.replace("USDT", "")}</b>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, color: C.textDim }}>{usd(t.lastPrice)}</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <Pill tone="blue">Khung {t.interval}</Pill>
+            <Pill tone={t.direction === "LONG" ? "bull" : muted ? "amber" : "amber"}>{muted ? "KHÁ" : t.direction} · {t.confidence}%</Pill>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11.5, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace", paddingLeft: 24 }}>
+          <span>Biên độ 24h {t.rangePct.toFixed(1)}%</span>
+          <span>Vol {usd(t.quoteVolume / 1e6)}M</span>
+          <span>⏱ {formatDuration(t.estHoldMinutes)}</span>
+        </div>
+        {hasPlan ? (
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace", paddingLeft: 24 }}>
+            <span>Vốn {usd(plannedCapital)}</span>
+            <span style={{ color: C.bull }}>Nếu đúng kịch bản: +{usd(expectedProfit)} ({t.pctTarget > 0 ? "+" : ""}{t.pctTarget}%)</span>
+            <span style={{ color: C.bear }}>Nếu chạm stop: {usd(expectedLoss)} ({t.pctStop}%)</span>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: C.textFaint, paddingLeft: 24 }}>BREAKOUT NÓNG chưa có entry/target cụ thể — không tính được lời/lỗ dự kiến.</div>
+        )}
+        <div style={{ fontSize: 11.5, color: C.textFaint, paddingLeft: 24, display: "flex", flexDirection: "column", gap: 2 }}>
+          <span>Chu kỳ BOLL 1H cố định (TB 7 ngày): {t.bollCycle1h === undefined ? "đang tính..." : t.bollCycle1h ? `~${formatDuration(t.bollCycle1h.avgMinutes)} từ LB→UB (${t.bollCycle1h.count} chu kỳ)` : "chưa có chu kỳ hoàn chỉnh trong 7 ngày qua"}</span>
+          {t.interval !== "1h" && (
+            <span>Chu kỳ BOLL khung {t.interval} (khung đã kích hoạt tín hiệu này, TB 7 ngày): {t.bollCycleScan === undefined ? "đang tính..." : t.bollCycleScan ? `~${formatDuration(t.bollCycleScan.avgMinutes)} từ LB→UB (${t.bollCycleScan.count} chu kỳ)` : "chưa có chu kỳ hoàn chỉnh trong 7 ngày qua"}</span>
+          )}
+        </div>
+        <button className="tt-btn" onClick={() => { setCoinInput(t.symbol.replace("USDT", "")); if (onOverviewTab) setTab("action"); runAnalysis(t.symbol.replace("USDT", ""), t.interval); }}
+          style={{ marginTop: 2, width: "100%", background: "transparent", border: `1px solid ${muted ? C.amber : C.border}`, borderRadius: 8, color: muted ? C.amber : C.blue, fontSize: 13, fontWeight: 600, padding: "9px 10px" }}>Phân tích →</button>
+      </div>
+    );
+  }
   return (
     <Card>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
-        <SectionLabel>Gợi ý giao dịch — khung {scanInterval}, biên độ {rangeMin}-{rangeMax}%, thanh khoản cao</SectionLabel>
+        <SectionLabel>Gợi ý giao dịch — quét đồng thời 15m/1h/4h, biên độ {rangeMin}-{rangeMax}%, target ≥{minTargetPct}%, thanh khoản cao</SectionLabel>
         <button className="tt-btn" onClick={scanDayTrade} disabled={scanning} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, color: C.textDim, fontSize: 12, padding: "4px 10px", display: "flex", alignItems: "center", gap: 6 }}>
           <span className={scanning ? "spin" : ""} style={{ display: "flex" }}><Icon name="refresh" size={12} /></span> Quét lại
         </button>
       </div>
       <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 10, lineHeight: 1.5 }}>
-        Chỉ hiện coin có tín hiệu <b style={{ color: C.bull }}>LONG</b> trên khung {scanInterval} (đã loại TRUNG LẬP vì không dùng để vào lệnh được). Biên độ tính từ dao động cao/thấp <b>thật</b> trong 24h qua. Nguồn: watchlist của bạn + nhóm coin khối lượng lớn trên Binance. Danh sách này giống hệt nhau ở cả 2 tab.
+        Mỗi coin được kiểm tra trên CẢ 3 khung (15 phút, 1 giờ, 4 giờ) — chỉ cần đạt <b style={{ color: C.bull }}>LONG</b> ở 1 trong 3 khung là hiện ra, lấy khung có điểm cao nhất làm đại diện (nhãn "Khung..." trên mỗi dòng cho biết khung nào đã kích hoạt). Chỉ hiện coin có target đạt tối thiểu {minTargetPct}% (bạn chỉnh được bên dưới). Biên độ tính từ dao động cao/thấp <b>thật</b> trong 24h qua. Nguồn: watchlist của bạn + nhóm coin khối lượng lớn trên Binance. Danh sách này giống hệt nhau ở cả 2 tab.
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, color: C.textFaint }}>Khung thời gian</span>
+        <span style={{ fontSize: 12, color: C.textFaint }}>Khung mặc định khi bấm "Phân tích →"</span>
         <select value={scanInterval} onChange={(e) => setScanInterval(e.target.value)} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 8px", color: C.text, fontSize: 13 }}>
           {BINANCE_INTERVALS.map((i) => <option key={i.value} value={i.value}>{i.label} ({i.value})</option>)}
         </select>
+        <span style={{ fontSize: 11.5, color: C.textFaint }}>(danh sách gợi ý bên dưới luôn quét cả 15m/1h/4h, không phụ thuộc lựa chọn này)</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, color: C.textFaint }}>Vốn dự kiến vào mỗi lệnh</span>
@@ -1298,6 +1552,9 @@ function DayTradeCard({ results, scanning, error, scanDayTrade, setCoinInput, se
         <input type="number" value={rangeMin} min="0" max={rangeMax} step="0.5" onChange={(e) => setRangeMin(+e.target.value)} style={{ width: 60, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }} />
         <span style={{ fontSize: 12, color: C.textFaint }}>% đến</span>
         <input type="number" value={rangeMax} min={rangeMin} step="0.5" onChange={(e) => setRangeMax(+e.target.value)} style={{ width: 60, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }} />
+        <span style={{ fontSize: 12, color: C.textFaint }}>%</span>
+        <span style={{ fontSize: 12, color: C.textFaint, marginLeft: 8 }}>Target tối thiểu</span>
+        <input type="number" value={minTargetPct} min="0" step="0.5" onChange={(e) => setMinTargetPct(+e.target.value)} style={{ width: 60, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 8px", color: C.text, fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }} />
         <span style={{ fontSize: 12, color: C.textFaint }}>% · chỉnh xong bấm "Quét lại" để áp dụng ngay</span>
       </div>
       <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, fontSize: 12.5, color: C.textDim, cursor: "pointer" }}>
@@ -1305,18 +1562,18 @@ function DayTradeCard({ results, scanning, error, scanDayTrade, setCoinInput, se
         Hiện cả <span style={{ color: C.amber }}>BREAKOUT NÓNG</span> (xu hướng/volume mạnh nhưng quá mua — rủi ro cao hơn, tự chịu trách nhiệm nếu vào lệnh)
       </label>
       {error && <div style={{ fontSize: 13, color: C.bear, marginBottom: 10 }}>{error}</div>}
-      {scanning && results.length === 0 ? (
-        <div style={{ color: C.textFaint, fontSize: 13 }}>Đang quét (có thể mất 10-30 giây tùy số coin đạt biên độ)...</div>
-      ) : results.length === 0 ? (
+      {scanning && results.length === 0 && tier2.length === 0 ? (
+        <div style={{ color: C.textFaint, fontSize: 13 }}>Đang quét cả 3 khung cho từng coin (có thể mất 30-90 giây tùy số coin đạt biên độ)...</div>
+      ) : results.length === 0 && tier2.length === 0 ? (
         <div>
-          <div style={{ color: C.textFaint, fontSize: 13, marginBottom: diag ? 10 : 0 }}>Hiện không có coin nào vừa đạt biên độ {rangeMin}-{rangeMax}% vừa có tín hiệu LONG trên khung {scanInterval} lúc này. Bấm "Quét lại" để kiểm tra lại.</div>
+          <div style={{ color: C.textFaint, fontSize: 13, marginBottom: diag ? 10 : 0 }}>Hiện không có coin nào vừa đạt biên độ {rangeMin}-{rangeMax}% vừa có tín hiệu LONG (ở bất kỳ khung nào trong 15m/1h/4h) vừa đạt target ≥{minTargetPct}% lúc này. Bấm "Quét lại" để kiểm tra lại.</div>
           {diag && (
             <div style={{ background: C.surface2, borderRadius: 8, padding: 12, fontSize: 12.5, color: C.textDim, lineHeight: 1.7 }}>
               <div><b style={{ color: C.text }}>Vì sao trống — chẩn đoán bộ lọc:</b></div>
               <div>• Tổng nguồn ứng viên (watchlist + khối lượng lớn): <b>{diag.poolSize}</b> coin</div>
               <div>• Đạt biên độ 24h {rangeMin}-{rangeMax}%: <b>{diag.inRangeCount}</b> coin</div>
-              <div>• Đã kiểm tra tín hiệu khung {scanInterval}: <b>{diag.checkedCount}</b> coin</div>
-              <div>• Đạt LONG: <b style={{ color: diag.longCount > 0 ? C.bull : C.text }}>{diag.longCount}</b> · Đạt BREAKOUT NÓNG: <b style={{ color: C.amber }}>{diag.breakoutCount}</b></div>
+              <div>• Đã kiểm tra tín hiệu (khung tốt nhất trong 15m/1h/4h): <b>{diag.checkedCount}</b> coin</div>
+              <div>• Đạt LONG + target ≥{minTargetPct}%: <b style={{ color: diag.longCount > 0 ? C.bull : C.text }}>{diag.longCount}</b> · Đạt BREAKOUT NÓNG: <b style={{ color: C.amber }}>{diag.breakoutCount}</b></div>
               {diag.nearMiss && diag.nearMiss.length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ color: C.text }}>Gần đạt nhất (chưa đủ điểm LONG):</div>
@@ -1325,56 +1582,35 @@ function DayTradeCard({ results, scanning, error, scanDayTrade, setCoinInput, se
                   ))}
                 </div>
               )}
-              <div style={{ marginTop: 8, fontStyle: "italic" }}>Nguyên nhân phổ biến nhất: khung càng ngắn biến động càng nhanh nên tín hiệu đủ mạnh (điểm ≥2) để LONG càng hiếm tại một thời điểm bất kỳ — đây là đánh đổi có chủ đích giữa số lượng và chất lượng tín hiệu, không phải lỗi. Thử khung dài hơn (1h, 4h) nếu khung {scanInterval} liên tục trống.</div>
+              <div style={{ marginTop: 8, fontStyle: "italic" }}>Đây là đánh đổi có chủ đích giữa số lượng và chất lượng tín hiệu, không phải lỗi — đã quét cả 3 khung để tối đa cơ hội mà không hạ chuẩn điểm số.</div>
             </div>
           )}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {results.map((t, idx) => {
-            const hasPlan = t.direction === "LONG" && t.pctTarget != null && t.pctStop != null;
-            const expectedProfit = hasPlan ? plannedCapital * (t.pctTarget / 100) : null;
-            const expectedLoss = hasPlan ? plannedCapital * (t.pctStop / 100) : null; // pctStop đã âm sẵn
-            return (
-              <div key={t.symbol} className="tt-row" style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px", borderRadius: 10, border: `1px solid ${C.border}` }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                    <span style={{ width: 14, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{idx + 1}</span>
-                    <b style={{ fontSize: 15 }}>{t.symbol.replace("USDT", "")}</b>
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, color: C.textDim }}>{usd(t.lastPrice)}</span>
-                  </div>
-                  <Pill tone={t.direction === "LONG" ? "bull" : "amber"}>{t.direction} · {t.confidence}%</Pill>
+          {results.map((t, idx) => renderRow(t, idx, false))}
+          {results.length > 0 && <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 2 }}>⏱ Thời gian giữ lệnh dự kiến = ước tính thống kê dựa trên biến động trung bình mỗi nến (ATR) đến khi chạm target. Lời/lỗ dự kiến tính theo đúng % target/stop của tín hiệu — cả hai đều là ước tính dựa trên kịch bản, KHÔNG phải cam kết.</div>}
+
+          {tier2.length > 0 && (
+            <div style={{ marginTop: 10, paddingTop: 14, borderTop: `1px dashed ${C.borderLight}` }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 10 }}>
+                <Icon name="alert" size={14} color={C.amber} />
+                <div style={{ fontSize: 12.5, color: C.textDim, lineHeight: 1.6 }}>
+                  <b style={{ color: C.amber }}>Tín hiệu KHÁ — độ tin cậy thấp hơn LONG, chưa đạt ngưỡng 3.5/7.</b> Vẫn đạt target tối thiểu {minTargetPct}% nếu đúng kịch bản, nhưng ít tín hiệu đồng thuận hơn. Hoàn toàn do bạn quyết định có chấp nhận rủi ro cao hơn để có thêm cơ hội giao dịch hay không.
                 </div>
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11.5, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace", paddingLeft: 24 }}>
-                  <span>Biên độ 24h {t.rangePct.toFixed(1)}%</span>
-                  <span>Vol {usd(t.quoteVolume / 1e6)}M</span>
-                  <span>⏱ {formatDuration(t.estHoldMinutes)}</span>
-                </div>
-                {hasPlan ? (
-                  <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12.5, fontFamily: "'JetBrains Mono', monospace", paddingLeft: 24 }}>
-                    <span>Vốn {usd(plannedCapital)}</span>
-                    <span style={{ color: C.bull }}>Nếu đúng kịch bản: +{usd(expectedProfit)} ({t.pctTarget > 0 ? "+" : ""}{t.pctTarget}%)</span>
-                    <span style={{ color: C.bear }}>Nếu chạm stop: {usd(expectedLoss)} ({t.pctStop}%)</span>
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 12, color: C.textFaint, paddingLeft: 24 }}>BREAKOUT NÓNG chưa có entry/target cụ thể — không tính được lời/lỗ dự kiến.</div>
-                )}
-                <div style={{ fontSize: 11.5, color: C.textFaint, paddingLeft: 24 }}>
-                  Chu kỳ BOLL (1H, TB 7 ngày): {t.bollCycle === undefined ? "đang tính..." : t.bollCycle ? `~${formatDuration(t.bollCycle.avgMinutes)} từ LB→UB (${t.bollCycle.count} chu kỳ)` : "chưa có chu kỳ hoàn chỉnh trong 7 ngày qua"}
-                </div>
-                <button className="tt-btn" onClick={() => { setCoinInput(t.symbol.replace("USDT", "")); if (onOverviewTab) setTab("action"); runAnalysis(t.symbol.replace("USDT", ""), scanInterval); }}
-                  style={{ marginTop: 2, width: "100%", background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, color: C.blue, fontSize: 13, fontWeight: 600, padding: "9px 10px" }}>Phân tích →</button>
               </div>
-            );
-          })}
-          <div style={{ fontSize: 11.5, color: C.textFaint, marginTop: 2 }}>⏱ Thời gian giữ lệnh dự kiến = ước tính thống kê dựa trên biến động trung bình mỗi nến (ATR) đến khi chạm target. Lời/lỗ dự kiến tính theo đúng % target/stop của tín hiệu — cả hai đều là ước tính dựa trên kịch bản, KHÔNG phải cam kết.</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {tier2.map((t, idx) => renderRow(t, idx, true))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </Card>
   );
 }
 
-function OverviewTab({ tickers, watchlist, setWatchlist, topVolume, topVolBoll, topVolBollScanning, scanTop10Boll, fng, globalData, scanResults, setTab, setCoinInput, runAnalysis, dayTradeResults, dayTradeScanning, dayTradeError, dayTradeDiag, includeBreakout, setIncludeBreakout, rangeMin, setRangeMin, rangeMax, setRangeMax, scanInterval, setScanInterval, plannedCapital, setPlannedCapital, scanDayTrade }) {
+function OverviewTab({ tickers, watchlist, setWatchlist, topVolume, topVolBoll, topVolBollScanning, scanTop10Boll, fng, globalData, scanResults, setTab, setCoinInput, runAnalysis, dayTradeResults, dayTradeTier2, dayTradeScanning, dayTradeError, dayTradeDiag, includeBreakout, setIncludeBreakout, rangeMin, setRangeMin, rangeMax, setRangeMax, minTargetPct, setMinTargetPct, scanInterval, setScanInterval, plannedCapital, setPlannedCapital, scanDayTrade }) {
   const fngVal = fng ? +fng.value : null;
   const fngTone = fngVal == null ? "neutral" : fngVal < 25 ? "bear" : fngVal < 45 ? "amber" : fngVal < 55 ? "neutral" : fngVal < 75 ? "bull" : "amber";
   const btcDom = globalData?.market_cap_percentage?.btc;
@@ -1457,7 +1693,7 @@ function OverviewTab({ tickers, watchlist, setWatchlist, topVolume, topVolBoll, 
         </div>
       </Card>
 
-      <DayTradeCard results={dayTradeResults} scanning={dayTradeScanning} error={dayTradeError} diag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} setCoinInput={setCoinInput} setTab={setTab} runAnalysis={runAnalysis} onOverviewTab={true} />
+      <DayTradeCard results={dayTradeResults} tier2={dayTradeTier2} scanning={dayTradeScanning} error={dayTradeError} diag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} minTargetPct={minTargetPct} setMinTargetPct={setMinTargetPct} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} setCoinInput={setCoinInput} setTab={setTab} runAnalysis={runAnalysis} onOverviewTab={true} />
 
       <Card>
         <SectionLabel>Danh sách theo dõi</SectionLabel>
@@ -1509,7 +1745,7 @@ function OverviewTab({ tickers, watchlist, setWatchlist, topVolume, topVolBoll, 
   );
 }
 
-function ActionPlanTab({ coinInput, setCoinInput, runAnalysis, analyzing, analysis, analyzeError, scanResults, capital, riskPct, setRiskPct, addTrade, dayTradeResults, dayTradeScanning, dayTradeError, dayTradeDiag, includeBreakout, setIncludeBreakout, rangeMin, setRangeMin, rangeMax, setRangeMax, scanInterval, setScanInterval, plannedCapital, setPlannedCapital, scanDayTrade }) {
+function ActionPlanTab({ coinInput, setCoinInput, runAnalysis, analyzing, analysis, analyzeError, scanResults, capital, riskPct, setRiskPct, addTrade, dayTradeResults, dayTradeTier2, dayTradeScanning, dayTradeError, dayTradeDiag, includeBreakout, setIncludeBreakout, rangeMin, setRangeMin, rangeMax, setRangeMax, minTargetPct, setMinTargetPct, scanInterval, setScanInterval, plannedCapital, setPlannedCapital, scanDayTrade }) {
   const [showMethod, setShowMethod] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualEntry, setManualEntry] = useState("");
@@ -1517,7 +1753,7 @@ function ActionPlanTab({ coinInput, setCoinInput, runAnalysis, analyzing, analys
   const [manualTarget, setManualTarget] = useState("");
   const suggestedRisk$ = capital * (riskPct / 100);
   let qty = 0, positionValue = 0, riskAmount = 0, riskPctOfCapital = 0, riskExceeds = false;
-  if (analysis && analysis.direction === "LONG") {
+  if (analysis && (analysis.direction === "LONG" || analysis.direction === "TRUNG LẬP")) {
     const capped = Math.min(Math.max(plannedCapital, 0), capital);
     qty = analysis.entry > 0 ? capped / analysis.entry : 0;
     positionValue = capped;
@@ -1644,6 +1880,34 @@ function ActionPlanTab({ coinInput, setCoinInput, runAnalysis, analyzing, analys
                 <b style={{ color: C.amber }}>Đây không phải "không có gì xảy ra".</b> Xu hướng, MACD và volume đều đang mạnh theo hướng tăng (điểm lõi động lượng: {analysis.momentumCore.toFixed(1)}/3), nhưng RSI và/hoặc Bollinger cho thấy giá đã <b>quá nóng</b> — vào lệnh lúc này có rủi ro mua đúng đỉnh ngắn hạn cao hơn bình thường. <b>Tool cố tình không đề xuất entry/target trong trường hợp này</b> để tránh đuổi theo đỉnh — đây là quyết định thiết kế có chủ đích, không phải tool bị lỗi. Cân nhắc: chờ giá điều chỉnh về gần EMA20/vùng hỗ trợ để có entry an toàn hơn, hoặc theo dõi thêm nếu bạn đã biết rõ nguyên nhân tăng giá (tin tức, catalyst) và tự chấp nhận rủi ro cao hơn.
               </div>
             </div>
+          ) : analysis.direction === "TRUNG LẬP" ? (
+            <>
+              <div style={{ marginTop: 16, padding: 12, background: C.surface2, borderRadius: 10, fontSize: 12.5, color: C.textDim, lineHeight: 1.6, display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <Icon name="info" size={15} color={C.textFaint} />
+                <div>
+                  <b style={{ color: C.text }}>Đây là vùng THAM KHẢO — không phải khuyến nghị của hệ thống.</b> Tín hiệu chưa đủ mạnh để đạt ngưỡng LONG (điểm {analysis.score.toFixed(1)}/7, cần ≥3.5), nhưng vẫn tính sẵn 1 kế hoạch mua/bán theo đúng công thức chuẩn (dựa trên ATR/hỗ trợ/kháng cự hiện tại) để bạn tham khảo nếu tự tin vào nhận định riêng. <b style={{ color: C.amber }}>Quyết định vào lệnh hay không hoàn toàn do bạn.</b>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px,1fr))", gap: 12, marginTop: 12, opacity: 0.85 }}>
+                <MetricBox label="Giá vào (tham khảo)" value={usd(analysis.entry)} icon={<Icon name="target" size={14} color={C.textDim} />} />
+                <MetricBox label="Cắt lỗ tham khảo" value={`${usd(analysis.stop)} (${analysis.pctStop}%)`} icon={<Icon name="shield" size={14} color={C.bear} />} tone="bear" />
+                <MetricBox label="Chốt lời tham khảo" value={`${usd(analysis.target)} (+${analysis.pctTarget}%)`} icon={<Icon name="up" size={14} color={C.textDim} />} />
+                <MetricBox label="Tỷ lệ R:R tham khảo" value={analysis.rr ? `1 : ${analysis.rr}` : "—"} icon={<Icon name="activity" size={14} color={C.amber} />} />
+                <MetricBox label="Thời gian giữ dự kiến" value={formatDuration(analysis.estHoldMinutes)} icon={<Icon name="info" size={14} color={C.textDim} />} />
+              </div>
+              <div style={{ marginTop: 14, padding: 14, background: C.surface2, border: `1px dashed ${C.borderLight}`, borderRadius: 10 }}>
+                <SectionLabel>Nếu tự quyết định vào lệnh theo tham khảo này (vốn {usd(plannedCapital)})</SectionLabel>
+                <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontFamily: "'JetBrains Mono', monospace", fontSize: 13.5 }}>
+                  <div>Khối lượng: <b>{fmt(qty, 5)} {analysis.symbol.replace("USDT", "")}</b></div>
+                  <div>Giá trị lệnh: <b>{usd(positionValue)}</b></div>
+                  <div>Rủi ro nếu chạm stop: <b style={{ color: riskExceeds ? C.bear : C.text }}>{usd(riskAmount)} ({riskPctOfCapital.toFixed(2)}% vốn)</b></div>
+                </div>
+                <button className="tt-btn" onClick={() => addTrade({ symbol: analysis.symbol.replace("USDT", ""), direction: "LONG", entry: analysis.entry, stop: analysis.stop, target: analysis.target, qty, openedAt: new Date().toISOString(), source: "manual", signalAtEntry: analysis.direction, confidenceAtEntry: analysis.confidence, rsiAtEntry: analysis.curRsi, estHoldMinutes: analysis.estHoldMinutes, planInterval: analysis.interval })}
+                  style={{ marginTop: 12, width: "100%", background: "transparent", border: `1px solid ${C.amber}`, borderRadius: 10, padding: "12px 16px", color: C.amber, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                  Ghi nhận theo tham khảo này (tự quyết định)
+                </button>
+              </div>
+            </>
           ) : (
             <div style={{ marginTop: 20, padding: 14, background: C.surface2, borderRadius: 10, fontSize: 13.5, color: C.textDim, lineHeight: 1.6, display: "flex", gap: 10, alignItems: "flex-start" }}>
               <Icon name="info" size={16} color={C.textFaint} />
@@ -1657,7 +1921,7 @@ function ActionPlanTab({ coinInput, setCoinInput, runAnalysis, analyzing, analys
           {analysis.direction !== "LONG" && (
             <div style={{ marginTop: 12 }}>
               {!manualOpen ? (
-                <button className="tt-btn" onClick={() => setManualOpen(true)} style={{ background: "transparent", border: `1px dashed ${C.borderLight}`, borderRadius: 8, padding: "9px 16px", color: C.textDim, fontSize: 13 }}>
+                <button className="tt-btn" onClick={() => { if (analysis.isReferenceOnly && analysis.stop != null) { setManualEntry(String(analysis.entry)); setManualStop(String(analysis.stop)); setManualTarget(String(analysis.target)); } setManualOpen(true); }} style={{ background: "transparent", border: `1px dashed ${C.borderLight}`, borderRadius: 8, padding: "9px 16px", color: C.textDim, fontSize: 13 }}>
                   Tôi muốn tự vào lệnh (ngoài đề xuất của hệ thống) →
                 </button>
               ) : (
@@ -1727,12 +1991,12 @@ function ActionPlanTab({ coinInput, setCoinInput, runAnalysis, analyzing, analys
         </Card>
       )}
 
-      <DayTradeCard results={dayTradeResults} scanning={dayTradeScanning} error={dayTradeError} diag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} setCoinInput={setCoinInput} setTab={() => {}} runAnalysis={runAnalysis} onOverviewTab={false} />
+      <DayTradeCard results={dayTradeResults} tier2={dayTradeTier2} scanning={dayTradeScanning} error={dayTradeError} diag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} minTargetPct={minTargetPct} setMinTargetPct={setMinTargetPct} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} setCoinInput={setCoinInput} setTab={() => {}} runAnalysis={runAnalysis} onOverviewTab={false} />
     </div>
   );
 }
 
-function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, currentEquity, winRate, openRisk, equityCurve, realizedPnl, tickers, exportBackup, importBackup, persistMode, ghToken, ghGistId, ghSyncStatus, ghSyncMessage, ghLastSynced, initGistSync, linkExistingGist, syncNow, disconnectSync }) {
+function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, currentEquity, winRate, openRisk, equityCurve, realizedPnl, tickers, exportBackup, importBackup, persistMode, ghToken, ghGistId, ghSyncStatus, ghSyncMessage, ghLastSynced, initGistSync, linkExistingGist, syncNow, disconnectSync, pourTradeToGoal, setTab }) {
   const [showGhSetup, setShowGhSetup] = useState(false);
   const [ghSetupMode, setGhSetupMode] = useState("new"); // 'new' | 'link'
   const [ghTokenInput, setGhTokenInput] = useState("");
@@ -1743,6 +2007,13 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
   const [capitalInput, setCapitalInput] = useState(capital);
   const [exitInputs, setExitInputs] = useState({});
   const openTrades = trades.filter((t) => t.status === "open");
+  const openSummary = openTrades.reduce((acc, t) => {
+    const li = getLiveInfo(t);
+    acc.totalCapital += t.entry * t.qty;
+    if (li.floatingAmount != null) { acc.totalFloating += li.floatingAmount; acc.countPriced += 1; }
+    return acc;
+  }, { totalCapital: 0, totalFloating: 0, countPriced: 0 });
+  openSummary.pct = openSummary.totalCapital > 0 ? (openSummary.totalFloating / openSummary.totalCapital) * 100 : 0;
   const closedTrades = trades.filter((t) => t.status === "closed");
 
   function getLiveInfo(t) {
@@ -1869,7 +2140,7 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
               <input autoFocus type="number" value={capitalInput} onChange={(e) => setCapitalInput(+e.target.value)} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 8px", color: C.text, width: 100, fontFamily: "'JetBrains Mono', monospace" }} />
               <button className="tt-btn" onClick={() => { setCapital(capitalInput); setEditingCapital(false); }} style={{ background: C.blue, border: "none", borderRadius: 6, padding: "0 10px", color: "#04101a", fontSize: 12 }}>Lưu</button>
             </div>
-          ) : <div onClick={() => { setCapitalInput(capital); setEditingCapital(true); }} className="tt-tab" style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 700 }}>{usd(capital)}</div>}
+          ) : <div onDoubleClick={() => { setCapitalInput(capital); setEditingCapital(true); }} title="Nhấp đúp để sửa" className="tt-tab" style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 700, cursor: "pointer" }}>{usd(capital)}</div>}
         </Card>
         <Card><SectionLabel>Vốn hiện tại</SectionLabel><div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 700, color: currentEquity >= capital ? C.bull : C.bear }}>{usd(currentEquity)}</div></Card>
         <Card><SectionLabel>Lãi/lỗ đã thực hiện</SectionLabel><div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 700, color: realizedPnl >= 0 ? C.bull : C.bear }}>{realizedPnl >= 0 ? "+" : ""}{usd(realizedPnl)}</div></Card>
@@ -1891,6 +2162,13 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
 
       <Card><SectionLabel>Lệnh đang mở ({openTrades.length})</SectionLabel>
         {openTrades.length === 0 && <div style={{ color: C.textFaint, fontSize: 13 }}>Không có lệnh nào đang mở.</div>}
+        {openTrades.length > 0 && (
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 14, padding: "12px 14px", background: C.surface2, borderRadius: 10, fontFamily: "'JetBrains Mono', monospace", fontSize: 13.5 }}>
+            <div><span style={{ color: C.textFaint, fontFamily: "'Inter', sans-serif" }}>Tổng vốn đang mở: </span><b>{usd(openSummary.totalCapital)}</b></div>
+            <div><span style={{ color: C.textFaint, fontFamily: "'Inter', sans-serif" }}>Tổng lãi/lỗ tạm tính: </span><b style={{ color: openSummary.totalFloating >= 0 ? C.bull : C.bear }}>{openSummary.totalFloating >= 0 ? "+" : ""}{usd(openSummary.totalFloating)}</b></div>
+            <div><span style={{ color: C.textFaint, fontFamily: "'Inter', sans-serif" }}>% trên tổng vốn đang mở: </span><b style={{ color: openSummary.pct >= 0 ? C.bull : C.bear }}>{openSummary.pct >= 0 ? "+" : ""}{openSummary.pct.toFixed(2)}%</b></div>
+          </div>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {openTrades.map((t) => {
             const li = getLiveInfo(t);
@@ -2012,7 +2290,7 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
         {closedTrades.length === 0 && <div style={{ color: C.textFaint, fontSize: 13 }}>Chưa có lệnh nào đóng.</div>}
         <div style={{ overflowX: "auto" }}>
           <table>
-            <thead><tr style={{ color: C.textFaint, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textTransform: "uppercase" }}><td style={{ padding: "6px 8px" }}>Coin</td><td style={{ padding: "6px 8px" }}>Nguồn</td><td style={{ padding: "6px 8px" }}>Vốn vào lệnh</td><td style={{ padding: "6px 8px" }}>Giá vào</td><td style={{ padding: "6px 8px" }}>Giá đóng</td><td style={{ padding: "6px 8px" }}>Giữ thực tế / Dự kiến</td><td style={{ padding: "6px 8px" }}>Qty</td><td style={{ padding: "6px 8px" }}>P&L</td></tr></thead>
+            <thead><tr style={{ color: C.textFaint, fontFamily: "'JetBrains Mono', monospace", fontSize: 11, textTransform: "uppercase" }}><td style={{ padding: "6px 8px" }}>Coin</td><td style={{ padding: "6px 8px" }}>Nguồn</td><td style={{ padding: "6px 8px" }}>Vốn vào lệnh</td><td style={{ padding: "6px 8px" }}>Giá vào</td><td style={{ padding: "6px 8px" }}>Giá đóng</td><td style={{ padding: "6px 8px" }}>Giữ thực tế / Dự kiến</td><td style={{ padding: "6px 8px" }}>Qty</td><td style={{ padding: "6px 8px" }}>P&L</td><td style={{ padding: "6px 8px" }}>Mục tiêu</td></tr></thead>
             <tbody>{closedTrades.map((t) => {
               const overPlan = t.actualHoldMinutes != null && t.estHoldMinutes != null && t.actualHoldMinutes > t.estHoldMinutes;
               return (
@@ -2026,6 +2304,13 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
                   <span style={{ color: C.textFaint }}> / {formatDuration(t.estHoldMinutes)}</span>
                 </td>
                 <td style={{ padding: "8px", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(t.qty, 5)}</td><td style={{ padding: "8px", fontFamily: "'JetBrains Mono', monospace", color: t.pnl >= 0 ? C.bull : C.bear }}>{t.pnl >= 0 ? "+" : ""}{usd(t.pnl)}</td>
+                <td style={{ padding: "8px" }}>
+                  {t.pouredToGoal ? (
+                    <Pill tone="bull">Đã rót</Pill>
+                  ) : (
+                    <button className="tt-btn" onClick={() => pourTradeToGoal(t)} style={{ background: "transparent", border: `1px solid ${C.amber}`, borderRadius: 6, color: C.amber, fontSize: 11.5, padding: "4px 8px" }}>Rót vào Mục tiêu</button>
+                  )}
+                </td>
               </tr>
             );})}</tbody>
           </table>
@@ -2210,7 +2495,7 @@ function tierMessage(pct, profit) {
   if (pct > 0) return { text: "Giọt đầu tiên đã rót — khởi động tốt!", tone: "neutral" };
   return { text: "Chưa rót giọt nào — chờ lệnh đầu tiên.", tone: "neutral" };
 }
-function TestTube({ label, pct, profit, target, big }) {
+function TestTube({ label, pct, profit, target, big, bottomText }) {
   const clamped = Math.max(0, Math.min(100, pct));
   const reached = pct >= 100 && profit >= 0;
   const isLoss = profit < 0;
@@ -2244,12 +2529,12 @@ function TestTube({ label, pct, profit, target, big }) {
         </div>
       </div>
       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: big ? 22 : 15, fontWeight: 700, color: isLoss ? C.bear : C.text, textShadow: reached ? `0 0 10px rgba(${glowRgb},0.8)` : "none" }}>{clamped.toFixed(0)}%</div>
-      <div style={{ fontSize: 11, color: C.textFaint, textAlign: "center" }}>{usd(profit)} / {usd(target)}</div>
+      <div style={{ fontSize: 11, color: C.textFaint, textAlign: "center" }}>{bottomText || `${usd(profit)} / ${usd(target)}`}</div>
       <div style={{ fontSize: big ? 12 : 10.5, color: msgColor, textAlign: "center", lineHeight: 1.3 }}>{msg.text}</div>
     </div>
   );
 }
-function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, setGoalBigTarget, goalMonthlyPct, setGoalMonthlyPct, goalAdjustments, addGoalAdjustment, deleteGoalAdjustment, goalMonths, addGoalMonth, removeGoalMonth }) {
+function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, setGoalBigTarget, goalMonthlyPct, setGoalMonthlyPct, goalAdjustments, addGoalAdjustment, deleteGoalAdjustment, goalMonths, addGoalMonth, removeGoalMonth, editGoalMonthPct }) {
   const [editingCapital, setEditingCapital] = useState(false);
   const [capitalInput, setCapitalInput] = useState(capital);
   const [showManual, setShowManual] = useState(false);
@@ -2257,10 +2542,14 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
   const [manualNote, setManualNote] = useState("");
   const [manualDate, setManualDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [newMonthInput, setNewMonthInput] = useState(() => new Date().toISOString().slice(0, 7));
+  const [newMonthPct, setNewMonthPct] = useState(goalMonthlyPct);
+  const [editingMonthKey, setEditingMonthKey] = useState(null);
+  const [editingMonthPctInput, setEditingMonthPctInput] = useState(30);
 
   // v1.30: toàn bộ tab Mục tiêu chỉ tính theo rót thủ công, không tự động cộng từ lệnh đã đóng trong Portfolio.
   // v1.31: ống tháng nào hiển thị do BẠN tự thêm/xóa (goalMonths) — nhưng vốn đầu kỳ vẫn tính đúng theo
   // trình tự thời gian THẬT của mọi lần rót (kể cả ở tháng đã bị ẩn khỏi hiển thị), để không sai lệch.
+  // v2.3: mỗi tháng có mục tiêu % RIÊNG (goalMonths lưu {key, targetPct}) thay vì 1 mốc chung cho mọi tháng.
   const monthMap = {};
   goalAdjustments.forEach((a) => {
     const d = new Date(a.date);
@@ -2269,7 +2558,8 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
     monthMap[key].profit += a.amount;
     monthMap[key].count += 1;
   });
-  const allKeysFull = Array.from(new Set([...Object.keys(monthMap), ...goalMonths])).sort();
+  const goalMonthKeys = goalMonths.map((m) => m.key);
+  const allKeysFull = Array.from(new Set([...Object.keys(monthMap), ...goalMonthKeys])).sort();
 
   let running = capital;
   const allMonthsComputed = allKeysFull.map((key) => {
@@ -2277,17 +2567,19 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
     const startCapital = running;
     const info = monthMap[key] || { profit: 0, count: 0, year: y, month: m };
     running += info.profit;
-    const targetProfit = startCapital * (goalMonthlyPct / 100);
+    const gm = goalMonths.find((x) => x.key === key);
+    const monthPct = gm ? gm.targetPct : goalMonthlyPct;
+    const targetProfit = startCapital * (monthPct / 100);
     const pct = targetProfit > 0 ? (info.profit / targetProfit) * 100 : 0;
-    return { key, label: `Th.${m}/${String(y).slice(2)}`, ...info, startCapital, targetProfit, pct };
+    return { key, label: `Th.${m}/${String(y).slice(2)}`, ...info, startCapital, targetProfit, pct, monthPct };
   });
-  const months = allMonthsComputed.filter((m) => goalMonths.includes(m.key)).slice().reverse(); // mới nhất trước, chỉ ống đang bật
+  const months = allMonthsComputed.filter((m) => goalMonthKeys.includes(m.key)).slice().reverse(); // mới nhất trước, chỉ ống đang bật
 
   const adjustmentsTotal = goalAdjustments.reduce((a, x) => a + x.amount, 0);
   const effectiveEquity = capital + adjustmentsTotal;
-  const bigProfit = adjustmentsTotal;
-  const bigTargetProfit = goalBigTarget - capital;
-  const bigPct = bigTargetProfit > 0 ? (bigProfit / bigTargetProfit) * 100 : 0;
+  // v2.3: ống lớn giờ biểu diễn TỔNG VỐN (gồm cả vốn ban đầu) đạt được so với mốc goalBigTarget —
+  // trước đây chỉ tính riêng phần lợi nhuận, không cộng vốn ban đầu, gây hiểu lầm.
+  const bigPct = goalBigTarget > 0 ? (effectiveEquity / goalBigTarget) * 100 : 0;
   const monthsReached = months.filter((m) => m.pct >= 100 && m.profit >= 0).length;
 
   function submitManual() {
@@ -2299,8 +2591,10 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
   }
   function submitNewMonth() {
     if (!newMonthInput) return;
-    addGoalMonth(newMonthInput);
+    addGoalMonth(newMonthInput, +newMonthPct || 30);
   }
+  function startEditMonthPct(m) { setEditingMonthKey(m.key); setEditingMonthPctInput(m.monthPct); }
+  function saveEditMonthPct() { if (editingMonthKey) editGoalMonthPct(editingMonthKey, +editingMonthPctInput || 0); setEditingMonthKey(null); }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -2314,14 +2608,14 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
                 <input autoFocus type="number" value={capitalInput} onChange={(e) => setCapitalInput(+e.target.value)} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 8px", color: C.text, width: "100%", fontFamily: "'JetBrains Mono', monospace" }} />
                 <button className="tt-btn" onClick={() => { setCapital(capitalInput); setEditingCapital(false); }} style={{ background: C.blue, border: "none", borderRadius: 6, padding: "0 10px", color: "#04101a", fontSize: 12 }}>Lưu</button>
               </div>
-            ) : <div onClick={() => { setCapitalInput(capital); setEditingCapital(true); }} className="tt-tab" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700 }}>{usd(capital)}</div>}
+            ) : <div onDoubleClick={() => { setCapitalInput(capital); setEditingCapital(true); }} title="Nhấp đúp để sửa" className="tt-tab" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, cursor: "pointer" }}>{usd(capital)}</div>}
           </div>
           <div>
             <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 4 }}>Mục tiêu lớn</div>
             <input type="number" value={goalBigTarget} onChange={(e) => setGoalBigTarget(+e.target.value)} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 8px", color: C.text, width: "100%", fontFamily: "'JetBrains Mono', monospace", fontSize: 15 }} />
           </div>
           <div>
-            <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 4 }}>Mục tiêu %/tháng (trên vốn đầu kỳ)</div>
+            <div style={{ fontSize: 11, color: C.textFaint, marginBottom: 4 }}>Mục tiêu %/tháng mặc định (áp dụng khi thêm ống mới)</div>
             <input type="number" value={goalMonthlyPct} step="1" onChange={(e) => setGoalMonthlyPct(+e.target.value)} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 8px", color: C.text, width: "100%", fontFamily: "'JetBrains Mono', monospace", fontSize: 15 }} />
           </div>
         </div>
@@ -2364,7 +2658,7 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
       <Card style={{ border: `1px solid rgba(242,184,75,0.3)`, boxShadow: "0 0 24px rgba(242,184,75,0.08)" }}>
         <SectionLabel>Mục tiêu lớn — ống nghiệm chính</SectionLabel>
         <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
-          <TestTube label={`${usd(capital)} → ${usd(goalBigTarget)}`} pct={bigPct} profit={bigProfit} target={bigTargetProfit} big />
+          <TestTube label={`${usd(capital)} → ${usd(goalBigTarget)}`} pct={bigPct} profit={adjustmentsTotal} target={goalBigTarget} big bottomText={`${usd(effectiveEquity)} / ${usd(goalBigTarget)}`} />
           <div style={{ flex: 1, minWidth: 160 }}>
             <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.7 }}>
               <div>Vốn theo mục tiêu (vốn ban đầu + tổng rót thủ công): <b style={{ color: C.text, fontFamily: "'JetBrains Mono', monospace" }}>{usd(effectiveEquity)}</b></div>
@@ -2377,22 +2671,34 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
 
       <Card>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
-          <SectionLabel>Ống nghiệm theo tháng — tự chọn tháng muốn theo dõi</SectionLabel>
+          <SectionLabel>Ống nghiệm theo tháng — tự chọn tháng muốn theo dõi, mục tiêu % riêng từng tháng</SectionLabel>
         </div>
-        <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 12 }}>Mục tiêu mỗi tháng = {goalMonthlyPct}% trên vốn đầu kỳ của chính tháng đó (không phải vốn ban đầu cố định) — vốn đầu kỳ tự cập nhật theo lãi/lỗ tháng trước, kể cả những tháng bạn đã ẩn ống.</div>
+        <div style={{ fontSize: 12, color: C.textFaint, marginBottom: 12 }}>Mục tiêu mỗi tháng = % bạn đặt riêng cho tháng đó × vốn đầu kỳ của chính tháng đó (không phải vốn ban đầu cố định) — vốn đầu kỳ tự cập nhật theo lãi/lỗ tháng trước, kể cả những tháng bạn đã ẩn ống. Nhấp đúp vào số % dưới mỗi ống để sửa lại bất cứ lúc nào.</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
           <input type="month" value={newMonthInput} onChange={(e) => setNewMonthInput(e.target.value)} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "7px 10px", color: C.text, fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }} />
-          <button className="tt-btn" onClick={submitNewMonth} disabled={!newMonthInput || goalMonths.includes(newMonthInput)} style={{ background: C.blue, border: "none", borderRadius: 6, padding: "7px 14px", color: "#04101a", fontWeight: 600, fontSize: 13, opacity: (!newMonthInput || goalMonths.includes(newMonthInput)) ? 0.4 : 1 }}>+ Thêm ống tháng</button>
-          {newMonthInput && goalMonths.includes(newMonthInput) && <span style={{ fontSize: 12, color: C.textFaint }}>Tháng này đã có ống rồi.</span>}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="number" value={newMonthPct} step="1" onChange={(e) => setNewMonthPct(e.target.value)} style={{ width: 60, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "7px 8px", color: C.text, fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }} />
+            <span style={{ fontSize: 12, color: C.textFaint }}>% mục tiêu</span>
+          </div>
+          <button className="tt-btn" onClick={submitNewMonth} disabled={!newMonthInput || goalMonths.some((m) => m.key === newMonthInput)} style={{ background: C.blue, border: "none", borderRadius: 6, padding: "7px 14px", color: "#04101a", fontWeight: 600, fontSize: 13, opacity: (!newMonthInput || goalMonths.some((m) => m.key === newMonthInput)) ? 0.4 : 1 }}>+ Thêm ống tháng</button>
+          {newMonthInput && goalMonths.some((m) => m.key === newMonthInput) && <span style={{ fontSize: 12, color: C.textFaint }}>Tháng này đã có ống rồi.</span>}
         </div>
         {months.length === 0 ? (
-          <div style={{ color: C.textFaint, fontSize: 13 }}>Chưa có ống tháng nào — chọn tháng ở trên và bấm "Thêm ống tháng" để bắt đầu.</div>
+          <div style={{ color: C.textFaint, fontSize: 13 }}>Chưa có ống tháng nào — chọn tháng + % mục tiêu ở trên và bấm "Thêm ống tháng" để bắt đầu.</div>
         ) : (
           <div style={{ display: "flex", gap: 18, overflowX: "auto", paddingBottom: 6 }}>
             {months.map((m) => (
-              <div key={m.key} style={{ position: "relative" }}>
+              <div key={m.key} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                 <button className="tt-btn" onClick={() => removeGoalMonth(m.key)} title="Xóa ống này (không xóa các lần rót đã ghi)" style={{ position: "absolute", top: -4, right: -4, zIndex: 1, width: 20, height: 20, borderRadius: "50%", background: C.surface, border: `1px solid ${C.border}`, color: C.textFaint, fontSize: 12, lineHeight: 1, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
                 <TestTube label={`${m.label} (${m.count} lần rót)`} pct={m.pct} profit={m.profit} target={m.targetProfit} />
+                {editingMonthKey === m.key ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <input autoFocus type="number" value={editingMonthPctInput} onChange={(e) => setEditingMonthPctInput(+e.target.value)} style={{ width: 48, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, padding: "3px 5px", color: C.text, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }} />
+                    <button className="tt-btn" onClick={saveEditMonthPct} style={{ background: C.blue, border: "none", borderRadius: 5, padding: "3px 8px", color: "#04101a", fontSize: 10.5, fontWeight: 700 }}>Lưu</button>
+                  </div>
+                ) : (
+                  <div onDoubleClick={() => startEditMonthPct(m)} title="Nhấp đúp để sửa mục tiêu %" style={{ fontSize: 10.5, color: C.textFaint, cursor: "pointer" }}>Mục tiêu: {m.monthPct}%</div>
+                )}
               </div>
             ))}
           </div>

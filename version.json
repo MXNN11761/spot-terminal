@@ -1,4 +1,4 @@
 {
-  "version": "v2.2",
-  "notes": "Dong 'Hien tai' cua lenh dang mo gio hien them so tien lai/lo dang co (vd +0.80% * +$34.95), khong chi rieng %."
+  "version": "v2.5",
+  "notes": "Ket hop ca 3 huong cho danh sach goi y giao dich trong ngay: (1) loc theo dung target toi thieu (mac dinh 2%, tuy chinh duoc), (2) quet dong thoi 3 khung 15m/1h/4h cho moi coin thay vi 1 khung, lay ket qua tot nhat, (3) hang 'Kha' (diem 2.5-3.5) hien rieng biet, minh bach, khong an. Them tong hop cac lenh dang mo (tong von, tong lai/lo, %). Da kiem chung bang render test that."
 }
