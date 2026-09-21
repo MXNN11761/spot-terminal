@@ -84,7 +84,7 @@
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback, useRef } = React;
-const VERSION = "v2.6";
+const VERSION = "v2.7";
 
 /* ============================== ICONS (SVG thuần, không phụ thuộc thư viện) ============================== */
 function Icon({ name, size = 14, color = "currentColor" }) {
@@ -833,6 +833,7 @@ function CryptoTerminal() {
   const [goalBigTarget, setGoalBigTarget] = useState(200000);
   const [goalMonthlyPct, setGoalMonthlyPct] = useState(30);
   const [goalAdjustments, setGoalAdjustments] = useState([]); // {id, amount, date, note} — rót thủ công ngoài lệnh đã ghi nhận trong tool
+  const [goalSavings, setGoalSavings] = useState([]); // {id, amount, date, note} — rút lợi nhuận đưa vào tích lũy, KHÔNG tính vào ống tháng/ống lớn
   const [goalMonths, setGoalMonths] = useState(() => {
     const d = new Date();
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -874,6 +875,7 @@ function CryptoTerminal() {
       if (parsed.goalBigTarget != null) setGoalBigTarget(parsed.goalBigTarget);
       if (parsed.goalMonthlyPct != null) setGoalMonthlyPct(parsed.goalMonthlyPct);
       if (parsed.goalAdjustments) setGoalAdjustments(parsed.goalAdjustments);
+      if (parsed.goalSavings) setGoalSavings(parsed.goalSavings);
       if (parsed.goalMonths) {
         const defaultPct = parsed.goalMonthlyPct != null ? parsed.goalMonthlyPct : 30;
         const converted = parsed.goalMonths.map((m) => (typeof m === "string" ? { key: m, targetPct: defaultPct } : m));
@@ -883,7 +885,7 @@ function CryptoTerminal() {
     } catch (e) {}
   }
   function exportBackup() {
-    const payload = JSON.stringify({ capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, lastModified: localLastModified, exportedAt: new Date().toISOString() }, null, 2);
+    const payload = JSON.stringify({ capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalSavings, goalMonths, lastModified: localLastModified, exportedAt: new Date().toISOString() }, null, 2);
     const blob = new Blob([payload], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -954,7 +956,7 @@ function CryptoTerminal() {
       lm = new Date().toISOString();
     }
     if (lm !== localLastModified) setLocalLastModified(lm);
-    const stateObj = { capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, lastModified: lm };
+    const stateObj = { capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalSavings, goalMonths, lastModified: lm };
     const payload = JSON.stringify(stateObj);
     if (persistMode === "cloud") {
       window.storage.set("terminal-state", payload).catch(() => {});
@@ -969,7 +971,7 @@ function CryptoTerminal() {
         .then(() => { setGhSyncStatus("idle"); setGhLastSynced(lm); setGhSyncMessage(null); })
         .catch((e) => { setGhSyncStatus("error"); setGhSyncMessage(e.message || "Lỗi đồng bộ lên GitHub"); });
     }
-  }, [capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, dataReady, persistMode, ghToken, ghGistId]);
+  }, [capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalSavings, goalMonths, dataReady, persistMode, ghToken, ghGistId]);
 
   useEffect(() => {
     if (!dataReady) return;
@@ -998,7 +1000,7 @@ function CryptoTerminal() {
   async function initGistSync(token) {
     setGhSyncStatus("syncing"); setGhSyncMessage(null);
     try {
-      const stateObj = { capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, lastModified: localLastModified || new Date().toISOString() };
+      const stateObj = { capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalSavings, goalMonths, lastModified: localLastModified || new Date().toISOString() };
       const gist = await ghCreateGist(token, stateObj);
       setGhToken(token); setGhGistId(gist.id); setGhSyncStatus("idle"); setGhLastSynced(stateObj.lastModified);
     } catch (e) { setGhSyncStatus("error"); setGhSyncMessage(e.message || "Không tạo được đồng bộ mới"); }
@@ -1021,7 +1023,7 @@ function CryptoTerminal() {
       if (remote && remote.lastModified && (!localLastModified || new Date(remote.lastModified) > new Date(localLastModified))) {
         setGhPendingRemote(remote);
       } else {
-        const stateObj = { capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalMonths, lastModified: localLastModified };
+        const stateObj = { capital, trades, watchlist, goalBigTarget, goalMonthlyPct, goalAdjustments, goalSavings, goalMonths, lastModified: localLastModified };
         await ghPushGist(ghToken, ghGistId, stateObj);
         setGhLastSynced(localLastModified);
       }
@@ -1353,8 +1355,21 @@ function CryptoTerminal() {
     }));
   }
   function deleteTrade(id) { setTrades((prev) => prev.filter((t) => t.id !== id)); }
+  function resetAllGameData() {
+    setCapital(5000);
+    setTrades([]);
+    setWatchlist(DEFAULT_WATCHLIST);
+    setGoalBigTarget(200000);
+    setGoalMonthlyPct(30);
+    setGoalAdjustments([]);
+    setGoalSavings([]);
+    const d = new Date();
+    setGoalMonths([{ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, targetPct: 30 }]);
+  }
   function addGoalAdjustment(adj) { setGoalAdjustments((prev) => [{ id: Date.now(), ...adj }, ...prev]); }
   function deleteGoalAdjustment(id) { setGoalAdjustments((prev) => prev.filter((a) => a.id !== id)); }
+  function addGoalSaving(s) { setGoalSavings((prev) => [{ id: Date.now(), ...s }, ...prev]); }
+  function deleteGoalSaving(id) { setGoalSavings((prev) => prev.filter((s) => s.id !== id)); }
   function pourTradeToGoal(trade) {
     addGoalAdjustment({ amount: trade.pnl, date: trade.closedAt || new Date().toISOString(), note: `Lệnh ${trade.symbol} (${trade.source === "manual" ? "tự quyết định" : "hệ thống"})`, fromTradeId: trade.id });
     setTrades((prev) => prev.map((t) => (t.id === trade.id ? { ...t, pouredToGoal: true } : t)));
@@ -1465,8 +1480,8 @@ function CryptoTerminal() {
         {tab === "overview" && <OverviewTab tickers={tickers} watchlist={watchlist} setWatchlist={setWatchlist} topVolume={topVolume} topVolBoll={topVolBoll} topVolBollScanning={topVolBollScanning} scanTop10Boll={scanTop10Boll} fng={fng} globalData={globalData} scanResults={scanResults} setTab={setTab} setCoinInput={setCoinInput} runAnalysis={runAnalysis} dayTradeResults={dayTradeResults} dayTradeTier2={dayTradeTier2} dayTradeScanning={dayTradeScanning} dayTradeError={dayTradeError} dayTradeDiag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} minTargetPct={minTargetPct} setMinTargetPct={setMinTargetPct} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} />}
         {tab === "action" && <ActionPlanTab coinInput={coinInput} setCoinInput={setCoinInput} runAnalysis={runAnalysis} analyzing={analyzing} analysis={analysis} analyzeError={analyzeError} scanResults={scanResults} capital={currentEquity} riskPct={riskPct} setRiskPct={setRiskPct} addTrade={addTrade} dayTradeResults={dayTradeResults} dayTradeTier2={dayTradeTier2} dayTradeScanning={dayTradeScanning} dayTradeError={dayTradeError} dayTradeDiag={dayTradeDiag} includeBreakout={includeBreakout} setIncludeBreakout={setIncludeBreakout} rangeMin={rangeMin} setRangeMin={setRangeMin} rangeMax={rangeMax} setRangeMax={setRangeMax} minTargetPct={minTargetPct} setMinTargetPct={setMinTargetPct} scanInterval={scanInterval} setScanInterval={setScanInterval} plannedCapital={plannedCapital} setPlannedCapital={setPlannedCapital} scanDayTrade={scanDayTrade} />}
         {tab === "backtest" && <BacktestTab btSymbol={btSymbol} setBtSymbol={setBtSymbol} btMonths={btMonths} setBtMonths={setBtMonths} btRunning={btRunning} btError={btError} btResult={btResult} runSingleBacktest={runSingleBacktest} runWatchlistBacktest={runWatchlistBacktest} currentEquity={currentEquity} />}
-        {tab === "portfolio" && <PortfolioTab capital={capital} setCapital={setCapital} trades={trades} closeTrade={closeTrade} deleteTrade={deleteTrade} currentEquity={currentEquity} winRate={winRate} openRisk={openRisk} equityCurve={equityCurve} realizedPnl={realizedPnl} tickers={tickers} exportBackup={exportBackup} importBackup={importBackup} persistMode={persistMode} ghToken={ghToken} ghGistId={ghGistId} ghSyncStatus={ghSyncStatus} ghSyncMessage={ghSyncMessage} ghLastSynced={ghLastSynced} initGistSync={initGistSync} linkExistingGist={linkExistingGist} syncNow={syncNow} disconnectSync={disconnectSync} pourTradeToGoal={pourTradeToGoal} setTab={setTab} />}
-        {tab === "goals" && <GoalsTab capital={capital} setCapital={setCapital} currentEquity={currentEquity} trades={trades} goalBigTarget={goalBigTarget} setGoalBigTarget={setGoalBigTarget} goalMonthlyPct={goalMonthlyPct} setGoalMonthlyPct={setGoalMonthlyPct} goalAdjustments={goalAdjustments} addGoalAdjustment={addGoalAdjustment} deleteGoalAdjustment={deleteGoalAdjustment} goalMonths={goalMonths} addGoalMonth={addGoalMonth} removeGoalMonth={removeGoalMonth} editGoalMonthPct={editGoalMonthPct} />}
+        {tab === "portfolio" && <PortfolioTab capital={capital} setCapital={setCapital} trades={trades} closeTrade={closeTrade} deleteTrade={deleteTrade} currentEquity={currentEquity} winRate={winRate} openRisk={openRisk} equityCurve={equityCurve} realizedPnl={realizedPnl} tickers={tickers} exportBackup={exportBackup} importBackup={importBackup} persistMode={persistMode} ghToken={ghToken} ghGistId={ghGistId} ghSyncStatus={ghSyncStatus} ghSyncMessage={ghSyncMessage} ghLastSynced={ghLastSynced} initGistSync={initGistSync} linkExistingGist={linkExistingGist} syncNow={syncNow} disconnectSync={disconnectSync} pourTradeToGoal={pourTradeToGoal} setTab={setTab} resetAllGameData={resetAllGameData} />}
+        {tab === "goals" && <GoalsTab capital={capital} setCapital={setCapital} currentEquity={currentEquity} trades={trades} goalBigTarget={goalBigTarget} setGoalBigTarget={setGoalBigTarget} goalMonthlyPct={goalMonthlyPct} setGoalMonthlyPct={setGoalMonthlyPct} goalAdjustments={goalAdjustments} addGoalAdjustment={addGoalAdjustment} deleteGoalAdjustment={deleteGoalAdjustment} goalSavings={goalSavings} addGoalSaving={addGoalSaving} deleteGoalSaving={deleteGoalSaving} goalMonths={goalMonths} addGoalMonth={addGoalMonth} removeGoalMonth={removeGoalMonth} editGoalMonthPct={editGoalMonthPct} />}
       </div>
       <div style={{ textAlign: "center", padding: "18px", fontSize: 11, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace" }}>Spot Terminal {VERSION} · dữ liệu từ Binance / CoinGecko / Alternative.me</div>
 
@@ -2035,7 +2050,9 @@ function ActionPlanTab({ coinInput, setCoinInput, runAnalysis, analyzing, analys
   );
 }
 
-function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, currentEquity, winRate, openRisk, equityCurve, realizedPnl, tickers, exportBackup, importBackup, persistMode, ghToken, ghGistId, ghSyncStatus, ghSyncMessage, ghLastSynced, initGistSync, linkExistingGist, syncNow, disconnectSync, pourTradeToGoal, setTab }) {
+function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, currentEquity, winRate, openRisk, equityCurve, realizedPnl, tickers, exportBackup, importBackup, persistMode, ghToken, ghGistId, ghSyncStatus, ghSyncMessage, ghLastSynced, initGistSync, linkExistingGist, syncNow, disconnectSync, pourTradeToGoal, setTab, resetAllGameData }) {
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetBackupChecked, setResetBackupChecked] = useState(false);
   const [showGhSetup, setShowGhSetup] = useState(false);
   const [ghSetupMode, setGhSetupMode] = useState("new"); // 'new' | 'link'
   const [ghTokenInput, setGhTokenInput] = useState("");
@@ -2355,6 +2372,45 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
           </table>
         </div>
       </Card>
+
+      <Card style={{ border: `1px solid ${C.bear}55`, boxShadow: "0 0 30px rgba(242,84,91,0.1)" }}>
+        <SectionLabel>Vùng khởi đầu mới</SectionLabel>
+        <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 14, lineHeight: 1.6 }}>
+          Muốn xoá sạch để bắt đầu lại từ đầu — vốn, lịch sử lệnh, mục tiêu, tích luỹ đều về mặc định? Đây là hành động <b style={{ color: C.text }}>không thể hoàn tác</b>, nhưng đôi khi một khởi đầu mới là điều cần thiết.
+        </div>
+        <button className="tt-btn" onClick={() => { setResetBackupChecked(false); setShowResetModal(true); }}
+          style={{ width: "100%", background: `linear-gradient(135deg, ${C.bear}, #FF8A3D)`, boxShadow: "0 0 24px rgba(242,84,91,0.5)", border: "none", borderRadius: 12, padding: "18px 16px", color: "#1A0405", fontWeight: 800, fontSize: 16, letterSpacing: 0.5, cursor: "pointer" }}>
+          🔄 RESET GAME — BẮT ĐẦU VÁN MỚI
+        </button>
+      </Card>
+
+      {showResetModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(5,6,10,0.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ width: 420, maxWidth: "100%", background: C.surface, border: `1px solid ${C.bear}`, borderRadius: 16, boxShadow: "0 0 40px rgba(242,84,91,0.3)", padding: 22 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: C.bear, marginBottom: 8 }}>⚠️ Trước khi làm mới toàn bộ dữ liệu</div>
+            <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.7, marginBottom: 16 }}>
+              Hành động này sẽ <b style={{ color: C.text }}>xoá vĩnh viễn</b> toàn bộ vốn, lịch sử lệnh, mục tiêu và tích luỹ trên thiết bị này, đưa mọi thứ về mặc định ban đầu. <b style={{ color: C.text }}>Không thể hoàn tác.</b>
+            </div>
+            {(ghToken && ghGistId) && (
+              <div style={{ fontSize: 12, color: C.amber, background: C.amberDim, borderRadius: 8, padding: 10, marginBottom: 14, lineHeight: 1.5 }}>
+                Đồng bộ GitHub đang bật — sau khi xoá, dữ liệu rỗng sẽ <b>tự động ghi đè</b> lên bản đồng bộ trên GitHub luôn. Nếu muốn giữ lại, hãy ngắt đồng bộ trước ở mục bên trên hoặc tự sao lưu Gist.
+              </div>
+            )}
+            <button className="tt-btn" onClick={exportBackup} style={{ width: "100%", background: C.blue, border: "none", borderRadius: 8, padding: "11px 14px", color: "#04101a", fontWeight: 700, fontSize: 13.5, marginBottom: 14 }}>📥 Tải file backup ngay</button>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12.5, color: C.textDim, cursor: "pointer", marginBottom: 18, lineHeight: 1.5 }}>
+              <input type="checkbox" checked={resetBackupChecked} onChange={(e) => setResetBackupChecked(e.target.checked)} style={{ marginTop: 2 }} />
+              Tôi đã tải và lưu file backup an toàn, hiểu rằng hành động tiếp theo không thể hoàn tác.
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="tt-btn" onClick={() => setShowResetModal(false)} style={{ flex: 1, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", color: C.textDim, fontSize: 13.5 }}>Huỷ</button>
+              <button className="tt-btn" disabled={!resetBackupChecked} onClick={() => { resetAllGameData(); setShowResetModal(false); }}
+                style={{ flex: 1.4, background: resetBackupChecked ? C.bear : C.surface2, opacity: resetBackupChecked ? 1 : 0.4, border: "none", borderRadius: 8, padding: "12px 14px", color: resetBackupChecked ? "#1A0405" : C.textFaint, fontWeight: 800, fontSize: 13.5, cursor: resetBackupChecked ? "pointer" : "not-allowed" }}>
+                🔥 XOÁ TẤT CẢ — BẮT ĐẦU LẠI
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2573,13 +2629,17 @@ function TestTube({ label, pct, profit, target, big, bottomText }) {
     </div>
   );
 }
-function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, setGoalBigTarget, goalMonthlyPct, setGoalMonthlyPct, goalAdjustments, addGoalAdjustment, deleteGoalAdjustment, goalMonths, addGoalMonth, removeGoalMonth, editGoalMonthPct }) {
+function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, setGoalBigTarget, goalMonthlyPct, setGoalMonthlyPct, goalAdjustments, addGoalAdjustment, deleteGoalAdjustment, goalSavings, addGoalSaving, deleteGoalSaving, goalMonths, addGoalMonth, removeGoalMonth, editGoalMonthPct }) {
   const [editingCapital, setEditingCapital] = useState(false);
   const [capitalInput, setCapitalInput] = useState(capital);
   const [showManual, setShowManual] = useState(false);
   const [manualAmount, setManualAmount] = useState("");
   const [manualNote, setManualNote] = useState("");
   const [manualDate, setManualDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [showSaving, setShowSaving] = useState(false);
+  const [savingAmount, setSavingAmount] = useState("");
+  const [savingNote, setSavingNote] = useState("");
+  const [savingDate, setSavingDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [newMonthInput, setNewMonthInput] = useState(() => new Date().toISOString().slice(0, 7));
   const [newMonthPct, setNewMonthPct] = useState(goalMonthlyPct);
   const [editingMonthKey, setEditingMonthKey] = useState(null);
@@ -2589,8 +2649,15 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
   // v1.31: ống tháng nào hiển thị do BẠN tự thêm/xóa (goalMonths) — nhưng vốn đầu kỳ vẫn tính đúng theo
   // trình tự thời gian THẬT của mọi lần rót (kể cả ở tháng đã bị ẩn khỏi hiển thị), để không sai lệch.
   // v2.3: mỗi tháng có mục tiêu % RIÊNG (goalMonths lưu {key, targetPct}) thay vì 1 mốc chung cho mọi tháng.
+  // v2.7: gộp cả rót thủ công (+) VÀ rút vào tích luỹ (-) thành 1 dòng sự kiện theo thời gian — tiền đã
+  // rút vào tích luỹ không còn được tính là "vốn đang hoạt động", nên tự động bị loại khỏi ống tháng
+  // tương ứng và ống lớn qua đúng cơ chế vốn đầu kỳ đã có sẵn (không cần logic riêng).
+  const events = [
+    ...goalAdjustments.map((a) => ({ ...a, amount: a.amount })),
+    ...goalSavings.map((s) => ({ ...s, amount: -s.amount })),
+  ];
   const monthMap = {};
-  goalAdjustments.forEach((a) => {
+  events.forEach((a) => {
     const d = new Date(a.date);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (!monthMap[key]) monthMap[key] = { profit: 0, count: 0, year: d.getFullYear(), month: d.getMonth() + 1 };
@@ -2614,7 +2681,8 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
   });
   const months = allMonthsComputed.filter((m) => goalMonthKeys.includes(m.key)).slice().reverse(); // mới nhất trước, chỉ ống đang bật
 
-  const adjustmentsTotal = goalAdjustments.reduce((a, x) => a + x.amount, 0);
+  const adjustmentsTotal = events.reduce((a, x) => a + x.amount, 0);
+  const totalSaved = goalSavings.reduce((a, x) => a + x.amount, 0);
   const effectiveEquity = capital + adjustmentsTotal;
   // v2.3: ống lớn giờ biểu diễn TỔNG VỐN (gồm cả vốn ban đầu) đạt được so với mốc goalBigTarget —
   // trước đây chỉ tính riêng phần lợi nhuận, không cộng vốn ban đầu, gây hiểu lầm.
@@ -2627,6 +2695,13 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
     const iso = new Date(manualDate + "T12:00:00").toISOString();
     addGoalAdjustment({ amount: amt, date: iso, note: manualNote.trim() || null });
     setManualAmount(""); setManualNote("");
+  }
+  function submitSaving() {
+    const amt = +savingAmount;
+    if (!amt || amt <= 0 || !savingDate) return;
+    const iso = new Date(savingDate + "T12:00:00").toISOString();
+    addGoalSaving({ amount: amt, date: iso, note: savingNote.trim() || null });
+    setSavingAmount(""); setSavingNote("");
   }
   function submitNewMonth() {
     if (!newMonthInput) return;
@@ -2689,6 +2764,39 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
           </div>
         )}
       </Card>
+
+      <Card style={{ border: `1px solid ${C.blue}44` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+          <SectionLabel>Đưa vào tích luỹ — rút lợi nhuận ra khỏi vốn đang hoạt động</SectionLabel>
+          {!showSaving && <button className="tt-btn" onClick={() => setShowSaving(true)} style={{ background: "transparent", border: `1px dashed ${C.borderLight}`, borderRadius: 6, color: C.textDim, fontSize: 12, padding: "5px 12px" }}>+ Đưa vào tích luỹ</button>}
+        </div>
+        <div style={{ fontSize: 12, color: C.textFaint, marginBottom: showSaving ? 12 : 0 }}>Khi làm tốt và muốn "chốt" một phần lợi nhuận ra khỏi vốn đang giao dịch (an toàn, không rủi ro tiếp), ghi nhận ở đây. Số tiền này sẽ <b style={{ color: C.text }}>KHÔNG được tính vào ống tháng tương ứng cũng như ống Mục tiêu lớn</b> — coi như đã rời khỏi "cuộc chơi".</div>
+        {showSaving && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input type="date" value={savingDate} onChange={(e) => setSavingDate(e.target.value)} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "8px 10px", color: C.text, fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }} />
+            <input type="number" value={savingAmount} min="0" onChange={(e) => setSavingAmount(e.target.value)} placeholder="Số tiền muốn rút (vd 500)" style={{ width: 170, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "8px 10px", color: C.text, fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }} />
+            <input value={savingNote} onChange={(e) => setSavingNote(e.target.value)} placeholder="Ghi chú (tùy chọn)" style={{ flex: 1, minWidth: 120, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "8px 10px", color: C.text, fontSize: 13 }} />
+            <button className="tt-btn" onClick={submitSaving} disabled={!savingAmount} style={{ background: savingAmount ? C.blue : C.surface, opacity: savingAmount ? 1 : 0.4, border: "none", borderRadius: 6, padding: "8px 14px", color: "#04101a", fontWeight: 600, fontSize: 13 }}>Rút vào tích luỹ</button>
+            <button className="tt-btn" onClick={() => setShowSaving(false)} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, padding: "8px 12px", color: C.textDim, fontSize: 13 }}>Đóng</button>
+          </div>
+        )}
+        {goalSavings.length > 0 && (
+          <>
+            <div style={{ marginTop: 14, marginBottom: 8, fontSize: 13, fontFamily: "'JetBrains Mono', monospace" }}>Tổng đã tích luỹ: <b style={{ color: C.blue }}>{usd(totalSaved)}</b></div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {[...goalSavings].sort((a, b) => new Date(b.date) - new Date(a.date)).map((s) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12.5, padding: "6px 10px", background: C.surface2, borderRadius: 6 }}>
+                  <span style={{ color: C.textDim }}>{new Date(s.date).toLocaleDateString("vi-VN")} — {s.note || "Đưa vào tích luỹ"}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace", color: C.blue }}>-{usd(s.amount)}</span>
+                    <button className="tt-btn" onClick={() => deleteGoalSaving(s.id)} style={{ background: "transparent", border: "none", padding: 2 }}><Icon name="trash" size={13} color={C.textFaint} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
       <Card>
         <SectionLabel>Đối chiếu tham khảo — vốn thực tế trong Portfolio</SectionLabel>
         <div style={{ fontSize: 12.5, color: C.textFaint }}>Vốn hiện tại theo lệnh đã đóng trong tool: <b style={{ color: C.text, fontFamily: "'JetBrains Mono', monospace" }}>{usd(currentEquity)}</b> — số này KHÔNG tính vào các ống bên dưới, chỉ để bạn đối chiếu nếu cần.</div>
@@ -2729,7 +2837,7 @@ function GoalsTab({ capital, setCapital, currentEquity, trades, goalBigTarget, s
             {months.map((m) => (
               <div key={m.key} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                 <button className="tt-btn" onClick={() => removeGoalMonth(m.key)} title="Xóa ống này (không xóa các lần rót đã ghi)" style={{ position: "absolute", top: -4, right: -4, zIndex: 1, width: 20, height: 20, borderRadius: "50%", background: C.surface, border: `1px solid ${C.border}`, color: C.textFaint, fontSize: 12, lineHeight: 1, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
-                <TestTube label={`${m.label} (${m.count} lần rót)`} pct={m.pct} profit={m.profit} target={m.targetProfit} />
+                <TestTube label={`${m.label} (${m.count} lần cập nhật)`} pct={m.pct} profit={m.profit} target={m.targetProfit} />
                 {editingMonthKey === m.key ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <input autoFocus type="number" value={editingMonthPctInput} onChange={(e) => setEditingMonthPctInput(+e.target.value)} style={{ width: 48, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, padding: "3px 5px", color: C.text, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }} />

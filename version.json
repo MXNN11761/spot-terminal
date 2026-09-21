@@ -1,4 +1,4 @@
 {
-  "version": "v2.6",
-  "notes": "O tra cuu nhanh gio keo-tha tu do duoc (giu vao thanh tieu de de keo, tha bat ky dau tren man hinh). Doi mau nen sang tong tim/indigo ro rang khac biet voi nen chinh de de nhin hon."
+  "version": "v2.7",
+  "notes": "Them nut 'RESET GAME' noi bat (vung nguy hiem) trong Bao cao & Nguon von - bat buoc tai backup + tick xac nhan truoc khi xoa toan bo du lieu. Them 'Dua vao tich luy' trong tab Muc tieu - rut loi nhuan ra khoi von dang hoat dong, tu dong loai khoi ong thang va ong lon. Da kiem chung bang render test that voi so lieu cu the."
 }
