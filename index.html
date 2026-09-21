@@ -84,7 +84,7 @@
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback, useRef } = React;
-const VERSION = "v2.7";
+const VERSION = "v2.8";
 
 /* ============================== ICONS (SVG thuần, không phụ thuộc thư viện) ============================== */
 function Icon({ name, size = 14, color = "currentColor" }) {
@@ -2373,21 +2373,21 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
         </div>
       </Card>
 
-      <Card style={{ border: `1px solid ${C.bear}55`, boxShadow: "0 0 30px rgba(242,84,91,0.1)" }}>
+      <Card style={{ border: "1px solid #7ED95755", boxShadow: "0 0 30px rgba(126,217,87,0.12)" }}>
         <SectionLabel>Vùng khởi đầu mới</SectionLabel>
         <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 14, lineHeight: 1.6 }}>
           Muốn xoá sạch để bắt đầu lại từ đầu — vốn, lịch sử lệnh, mục tiêu, tích luỹ đều về mặc định? Đây là hành động <b style={{ color: C.text }}>không thể hoàn tác</b>, nhưng đôi khi một khởi đầu mới là điều cần thiết.
         </div>
         <button className="tt-btn" onClick={() => { setResetBackupChecked(false); setShowResetModal(true); }}
-          style={{ width: "100%", background: `linear-gradient(135deg, ${C.bear}, #FF8A3D)`, boxShadow: "0 0 24px rgba(242,84,91,0.5)", border: "none", borderRadius: 12, padding: "18px 16px", color: "#1A0405", fontWeight: 800, fontSize: 16, letterSpacing: 0.5, cursor: "pointer" }}>
-          🔄 RESET GAME — BẮT ĐẦU VÁN MỚI
+          style={{ width: "100%", background: "linear-gradient(135deg, #8BC34A, #4CAF50)", boxShadow: "0 0 26px rgba(139,195,74,0.55)", border: "none", borderRadius: 14, padding: "18px 16px", color: "#0E2B0A", fontWeight: 800, fontSize: 16, letterSpacing: 0.5, cursor: "pointer" }}>
+          🌱 KHỞI ĐẦU MỚI — LÀM MỚI TOÀN BỘ
         </button>
       </Card>
 
       {showResetModal && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(5,6,10,0.85)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div style={{ width: 420, maxWidth: "100%", background: C.surface, border: `1px solid ${C.bear}`, borderRadius: 16, boxShadow: "0 0 40px rgba(242,84,91,0.3)", padding: 22 }}>
-            <div style={{ fontSize: 17, fontWeight: 800, color: C.bear, marginBottom: 8 }}>⚠️ Trước khi làm mới toàn bộ dữ liệu</div>
+          <div style={{ width: 420, maxWidth: "100%", background: "linear-gradient(160deg, #16241A, #12171F)", border: "1px solid #6FCB4A66", borderRadius: 18, boxShadow: "0 0 46px rgba(126,217,87,0.25)", padding: 24 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#9BE06A", marginBottom: 8 }}>🌱 Trước khi bắt đầu ván mới</div>
             <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.7, marginBottom: 16 }}>
               Hành động này sẽ <b style={{ color: C.text }}>xoá vĩnh viễn</b> toàn bộ vốn, lịch sử lệnh, mục tiêu và tích luỹ trên thiết bị này, đưa mọi thứ về mặc định ban đầu. <b style={{ color: C.text }}>Không thể hoàn tác.</b>
             </div>
@@ -2396,16 +2396,16 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
                 Đồng bộ GitHub đang bật — sau khi xoá, dữ liệu rỗng sẽ <b>tự động ghi đè</b> lên bản đồng bộ trên GitHub luôn. Nếu muốn giữ lại, hãy ngắt đồng bộ trước ở mục bên trên hoặc tự sao lưu Gist.
               </div>
             )}
-            <button className="tt-btn" onClick={exportBackup} style={{ width: "100%", background: C.blue, border: "none", borderRadius: 8, padding: "11px 14px", color: "#04101a", fontWeight: 700, fontSize: 13.5, marginBottom: 14 }}>📥 Tải file backup ngay</button>
+            <button className="tt-btn" onClick={exportBackup} style={{ width: "100%", background: "#3D8FE0", border: "none", borderRadius: 10, padding: "11px 14px", color: "#04101a", fontWeight: 700, fontSize: 13.5, marginBottom: 14 }}>📥 Tải file backup ngay</button>
             <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12.5, color: C.textDim, cursor: "pointer", marginBottom: 18, lineHeight: 1.5 }}>
               <input type="checkbox" checked={resetBackupChecked} onChange={(e) => setResetBackupChecked(e.target.checked)} style={{ marginTop: 2 }} />
               Tôi đã tải và lưu file backup an toàn, hiểu rằng hành động tiếp theo không thể hoàn tác.
             </label>
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="tt-btn" onClick={() => setShowResetModal(false)} style={{ flex: 1, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, padding: "12px 14px", color: C.textDim, fontSize: 13.5 }}>Huỷ</button>
+              <button className="tt-btn" onClick={() => setShowResetModal(false)} style={{ flex: 1, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px", color: C.textDim, fontSize: 13.5 }}>Huỷ</button>
               <button className="tt-btn" disabled={!resetBackupChecked} onClick={() => { resetAllGameData(); setShowResetModal(false); }}
-                style={{ flex: 1.4, background: resetBackupChecked ? C.bear : C.surface2, opacity: resetBackupChecked ? 1 : 0.4, border: "none", borderRadius: 8, padding: "12px 14px", color: resetBackupChecked ? "#1A0405" : C.textFaint, fontWeight: 800, fontSize: 13.5, cursor: resetBackupChecked ? "pointer" : "not-allowed" }}>
-                🔥 XOÁ TẤT CẢ — BẮT ĐẦU LẠI
+                style={{ flex: 1.4, background: resetBackupChecked ? "linear-gradient(135deg, #8BC34A, #4CAF50)" : C.surface2, boxShadow: resetBackupChecked ? "0 0 18px rgba(139,195,74,0.5)" : "none", opacity: resetBackupChecked ? 1 : 0.4, border: "none", borderRadius: 10, padding: "12px 14px", color: resetBackupChecked ? "#0E2B0A" : C.textFaint, fontWeight: 800, fontSize: 13.5, cursor: resetBackupChecked ? "pointer" : "not-allowed" }}>
+                🌱 XÁC NHẬN — BẮT ĐẦU MỚI
               </button>
             </div>
           </div>

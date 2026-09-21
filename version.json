@@ -1,4 +1,4 @@
 {
-  "version": "v2.7",
-  "notes": "Them nut 'RESET GAME' noi bat (vung nguy hiem) trong Bao cao & Nguon von - bat buoc tai backup + tick xac nhan truoc khi xoa toan bo du lieu. Them 'Dua vao tich luy' trong tab Muc tieu - rut loi nhuan ra khoi von dang hoat dong, tu dong loai khoi ong thang va ong lon. Da kiem chung bang render test that voi so lieu cu the."
+  "version": "v2.8",
+  "notes": "Doi tong mau khu vuc Reset Game tu do/canh bao sang xanh la tuoi moi day suc song (theo mau hinh tham khao) - nut gradient xanh chanh-la, icon la mam thay cho lua/canh bao. Van giu nguyen co che an toan: bat buoc tai backup + tick xac nhan truoc khi xoa."
 }
