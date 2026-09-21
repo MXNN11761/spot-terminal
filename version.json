@@ -1,4 +1,4 @@
 {
   "version": "v2.8",
-  "notes": "Doi tong mau khu vuc Reset Game tu do/canh bao sang xanh la tuoi moi day suc song (theo mau hinh tham khao) - nut gradient xanh chanh-la, icon la mam thay cho lua/canh bao. Van giu nguyen co che an toan: bat buoc tai backup + tick xac nhan truoc khi xoa."
+  "notes": "Va loi font: 2 nut o khu vuc Reset Game bi hien sai 1 vai ky tu (chu thuong lan vao chu HOA co dau tieng Viet, vd 'KHOi', 'TOAN Bo'). Sua bang cach chuyen tu chu IN HOA sang chu thuong/cau binh thuong (vua sua loi render, vua dung tinh than hien dai toi gian). Khong doi so version (van la v2.8), chi va giao dien."
 }

@@ -2379,8 +2379,8 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
           Muốn xoá sạch để bắt đầu lại từ đầu — vốn, lịch sử lệnh, mục tiêu, tích luỹ đều về mặc định? Đây là hành động <b style={{ color: C.text }}>không thể hoàn tác</b>, nhưng đôi khi một khởi đầu mới là điều cần thiết.
         </div>
         <button className="tt-btn" onClick={() => { setResetBackupChecked(false); setShowResetModal(true); }}
-          style={{ width: "100%", background: "linear-gradient(135deg, #8BC34A, #4CAF50)", boxShadow: "0 0 26px rgba(139,195,74,0.55)", border: "none", borderRadius: 14, padding: "18px 16px", color: "#0E2B0A", fontWeight: 800, fontSize: 16, letterSpacing: 0.5, cursor: "pointer" }}>
-          🌱 KHỞI ĐẦU MỚI — LÀM MỚI TOÀN BỘ
+          style={{ width: "100%", background: "linear-gradient(135deg, #8BC34A, #4CAF50)", boxShadow: "0 0 26px rgba(139,195,74,0.55)", border: "none", borderRadius: 14, padding: "18px 16px", color: "#0E2B0A", fontWeight: 700, fontSize: 15.5, cursor: "pointer" }}>
+          🌱 Khởi đầu mới — làm mới toàn bộ
         </button>
       </Card>
 
@@ -2404,8 +2404,8 @@ function PortfolioTab({ capital, setCapital, trades, closeTrade, deleteTrade, cu
             <div style={{ display: "flex", gap: 8 }}>
               <button className="tt-btn" onClick={() => setShowResetModal(false)} style={{ flex: 1, background: "transparent", border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px", color: C.textDim, fontSize: 13.5 }}>Huỷ</button>
               <button className="tt-btn" disabled={!resetBackupChecked} onClick={() => { resetAllGameData(); setShowResetModal(false); }}
-                style={{ flex: 1.4, background: resetBackupChecked ? "linear-gradient(135deg, #8BC34A, #4CAF50)" : C.surface2, boxShadow: resetBackupChecked ? "0 0 18px rgba(139,195,74,0.5)" : "none", opacity: resetBackupChecked ? 1 : 0.4, border: "none", borderRadius: 10, padding: "12px 14px", color: resetBackupChecked ? "#0E2B0A" : C.textFaint, fontWeight: 800, fontSize: 13.5, cursor: resetBackupChecked ? "pointer" : "not-allowed" }}>
-                🌱 XÁC NHẬN — BẮT ĐẦU MỚI
+                style={{ flex: 1.4, background: resetBackupChecked ? "linear-gradient(135deg, #8BC34A, #4CAF50)" : C.surface2, boxShadow: resetBackupChecked ? "0 0 18px rgba(139,195,74,0.5)" : "none", opacity: resetBackupChecked ? 1 : 0.4, border: "none", borderRadius: 10, padding: "12px 14px", color: resetBackupChecked ? "#0E2B0A" : C.textFaint, fontWeight: 700, fontSize: 13.5, cursor: resetBackupChecked ? "pointer" : "not-allowed" }}>
+                🌱 Xác nhận — bắt đầu mới
               </button>
             </div>
           </div>
