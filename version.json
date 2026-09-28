@@ -1,4 +1,4 @@
 {
-  "version": "v2.8",
-  "notes": "Va loi font: 2 nut o khu vuc Reset Game bi hien sai 1 vai ky tu (chu thuong lan vao chu HOA co dau tieng Viet, vd 'KHOi', 'TOAN Bo'). Sua bang cach chuyen tu chu IN HOA sang chu thuong/cau binh thuong (vua sua loi render, vua dung tinh than hien dai toi gian). Khong doi so version (van la v2.8), chi va giao dien."
+  "version": "v2.9",
+  "notes": "Doi ten tool thanh 'The big dream' o moi noi hien thi (tieu de, header, footer, PWA manifest) - giu nguyen dinh danh ky thuat noi bo (khoa luu tru, ten file Gist dong bo) de khong lam hong du lieu da luu/dong bo cua nguoi dung cu. Len do lai tong mau theo phong cach 'radar cong nghe' cyan/xanh dien (tham khao template A1Radar): doi C.blue tu xanh mem sang cyan sang, nen tinh van chuyen tong cyan, gradient tieu de moi, hieu ung radar-ping quanh icon logo, MetricBox them vach mau nhan trai kieu the chi so. KHONG doi cong thuc tin hieu/backtest (da doi chieu, van khop tuyet doi giua truc tiep va backtest)."
 }
