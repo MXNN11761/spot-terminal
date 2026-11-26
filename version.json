@@ -1,4 +1,4 @@
 {
-  "version": "v2.9",
-  "notes": "Doi ten tool thanh 'The big dream' o moi noi hien thi (tieu de, header, footer, PWA manifest) - giu nguyen dinh danh ky thuat noi bo (khoa luu tru, ten file Gist dong bo) de khong lam hong du lieu da luu/dong bo cua nguoi dung cu. Len do lai tong mau theo phong cach 'radar cong nghe' cyan/xanh dien (tham khao template A1Radar): doi C.blue tu xanh mem sang cyan sang, nen tinh van chuyen tong cyan, gradient tieu de moi, hieu ung radar-ping quanh icon logo, MetricBox them vach mau nhan trai kieu the chi so. KHONG doi cong thuc tin hieu/backtest (da doi chieu, van khop tuyet doi giua truc tiep va backtest)."
+  "version": "v3.0",
+  "notes": "Bo loc bien do goi y giao dich trong ngay (5-10%) de bo sot coin tang manh. Them dieu kien mo rong: coin co bien do 24h VUOT nguong tren (>rangeMax) van duoc dua vao danh sach neu lot Top 20 khoi luong giao dich tren Binance HOAC OKX (tich hop fetchOkxAllTickers vao scanDayTrade) - danh dau ro rang (badge + ghi chu rieng cho tung dong, + dong dem trong khung chan doan khi danh sach trong) de phan biet voi dieu kien loc bien do chuan. Khong doi cong thuc tin hieu/diem so/nguong LONG-AVOID, khong dong runBacktest (chi anh huong live scanning, giong pham vi thay doi da lam o v2.5 multi-timeframe)."
 }

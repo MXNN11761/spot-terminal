@@ -86,7 +86,7 @@
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback, useRef } = React;
-const VERSION = "v2.9";
+const VERSION = "v3.0";
 
 /* ============================== ICONS (SVG thuần, không phụ thuộc thư viện) ============================== */
 function Icon({ name, size = 14, color = "currentColor" }) {
@@ -1226,9 +1226,37 @@ function CryptoTerminal() {
       });
       topVolume.forEach((t) => { if (!poolMap[t.symbol]) poolMap[t.symbol] = t; });
       const pool = Object.values(poolMap).filter((t) => t.lastPrice > 0 && t.highPrice > 0 && t.lowPrice > 0);
-      const candidates = pool
-        .map((t) => ({ ...t, rangePct: ((t.highPrice - t.lowPrice) / t.lastPrice) * 100 }))
-        .filter((t) => t.rangePct >= rangeMin && t.rangePct <= rangeMax);
+      const poolWithRange = pool.map((t) => ({ ...t, rangePct: ((t.highPrice - t.lowPrice) / t.lastPrice) * 100 }));
+      const candidatesInRange = poolWithRange.filter((t) => t.rangePct >= rangeMin && t.rangePct <= rangeMax);
+
+      // v3.0: điều kiện mở rộng — biên độ 24h VƯỢT ngưỡng trên (>{rangeMax}%) vẫn dễ bị bộ lọc 5-10%
+      // bỏ sót dù tín hiệu tốt (coin tăng mạnh). Nếu coin đó nằm trong Top 20 khối lượng giao dịch của
+      // Binance HOẶC OKX (thanh khoản thật sự lớn, không phải biến động ảo), vẫn đưa vào danh sách —
+      // nhưng đánh dấu rõ ràng (admittedViaVolumeException) để phân biệt với coin đạt chuẩn biên độ bình thường.
+      const binanceTop20Set = new Set(topVolume.slice(0, 20).map((t) => t.symbol));
+      let okxTop20Set = new Set();
+      try {
+        const rawOkx = await fetchOkxAllTickers();
+        okxTop20Set = new Set(
+          rawOkx
+            .filter((t) => t.instId && t.instId.endsWith("-USDT") && !STABLE_OR_LEVERAGED_RE.test(t.instId.replace("-", "")))
+            .map((t) => ({ symbol: t.instId.replace("-", ""), vol: +t.volCcy24h || 0 }))
+            .sort((a, b) => b.vol - a.vol)
+            .slice(0, 20)
+            .map((t) => t.symbol)
+        );
+      } catch (e) { /* OKX lỗi — bỏ qua điều kiện mở rộng lượt này, không chặn luồng quét chính */ }
+
+      const volumeExceptionCandidates = poolWithRange
+        .filter((t) => t.rangePct > rangeMax)
+        .filter((t) => binanceTop20Set.has(t.symbol) || okxTop20Set.has(t.symbol))
+        .map((t) => {
+          const onBinance = binanceTop20Set.has(t.symbol);
+          const onOkx = okxTop20Set.has(t.symbol);
+          return { ...t, admittedViaVolumeException: true, volumeExceptionExchange: onBinance && onOkx ? "Binance & OKX" : onBinance ? "Binance" : "OKX" };
+        });
+
+      const candidates = [...candidatesInRange, ...volumeExceptionCandidates];
 
       // v2.5: quét ĐỒNG THỜI nhiều khung thời gian (15m/1h/4h) cho mỗi coin thay vì chỉ 1 khung —
       // tăng cơ hội tìm thấy tín hiệu thật mỗi ngày mà KHÔNG hạ ngưỡng LONG ở bất kỳ khung nào.
@@ -1282,7 +1310,7 @@ function CryptoTerminal() {
       await attachBollCycles(tier2);
 
       const nearMiss = [...allChecked].filter((r) => r.direction !== "LONG").sort((a, b) => b.score - a.score).slice(0, 3);
-      setDayTradeDiag({ poolSize: pool.length, inRangeCount: candidates.length, checkedCount: allChecked.length, longCount: longs.length, breakoutCount: breakouts.length, nearMiss });
+      setDayTradeDiag({ poolSize: pool.length, inRangeCount: candidatesInRange.length, volumeExceptionCount: volumeExceptionCandidates.length, checkedCount: allChecked.length, longCount: longs.length, breakoutCount: breakouts.length, nearMiss });
       setDayTradeResults(final);
       setDayTradeTier2(tier2);
     } catch (e) { setDayTradeError(e.message || "Lỗi quét danh sách giao dịch trong ngày."); }
@@ -1553,11 +1581,17 @@ function DayTradeCard({ results, tier2, scanning, error, scanDayTrade, setCoinIn
             <b style={{ fontSize: 15 }}>{t.symbol.replace("USDT", "")}</b>
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, color: C.textDim }}>{usd(t.lastPrice)}</span>
           </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
             <Pill tone="blue">Khung {t.interval}</Pill>
             <Pill tone={t.direction === "LONG" ? "bull" : muted ? "amber" : "amber"}>{muted ? "KHÁ" : t.direction} · {t.confidence}%</Pill>
+            {t.admittedViaVolumeException && <Pill tone="blue">Top 20 Vol {t.volumeExceptionExchange}</Pill>}
           </div>
         </div>
+        {t.admittedViaVolumeException && (
+          <div style={{ fontSize: 11.5, color: C.blue, paddingLeft: 24, fontStyle: "italic" }}>
+            Ghi chú: biên độ 24h {t.rangePct.toFixed(1)}% vượt ngưỡng lọc chuẩn — coin này vẫn được đưa vào vì nằm trong Top 20 khối lượng giao dịch trên {t.volumeExceptionExchange}, không phải do đạt điều kiện biên độ thông thường.
+          </div>
+        )}
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11.5, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace", paddingLeft: 24 }}>
           <span>Biên độ 24h {t.rangePct.toFixed(1)}%</span>
           <span>Vol {usd(t.quoteVolume / 1e6)}M</span>
@@ -1592,7 +1626,7 @@ function DayTradeCard({ results, tier2, scanning, error, scanDayTrade, setCoinIn
         </button>
       </div>
       <div style={{ fontSize: 12.5, color: C.textFaint, marginBottom: 10, lineHeight: 1.5 }}>
-        Mỗi coin được kiểm tra trên CẢ 3 khung (15 phút, 1 giờ, 4 giờ) — chỉ cần đạt <b style={{ color: C.bull }}>LONG</b> ở 1 trong 3 khung là hiện ra, lấy khung có điểm cao nhất làm đại diện (nhãn "Khung..." trên mỗi dòng cho biết khung nào đã kích hoạt). Chỉ hiện coin có target đạt tối thiểu {minTargetPct}% (bạn chỉnh được bên dưới). Biên độ tính từ dao động cao/thấp <b>thật</b> trong 24h qua. Nguồn: watchlist của bạn + nhóm coin khối lượng lớn trên Binance. Danh sách này giống hệt nhau ở cả 2 tab.
+        Mỗi coin được kiểm tra trên CẢ 3 khung (15 phút, 1 giờ, 4 giờ) — chỉ cần đạt <b style={{ color: C.bull }}>LONG</b> ở 1 trong 3 khung là hiện ra, lấy khung có điểm cao nhất làm đại diện (nhãn "Khung..." trên mỗi dòng cho biết khung nào đã kích hoạt). Chỉ hiện coin có target đạt tối thiểu {minTargetPct}% (bạn chỉnh được bên dưới). Biên độ tính từ dao động cao/thấp <b>thật</b> trong 24h qua. Nguồn: watchlist của bạn + nhóm coin khối lượng lớn trên Binance. <b style={{ color: C.blue }}>Coin có biên độ vượt {rangeMax}% vẫn được xét nếu lọt Top 20 khối lượng giao dịch Binance hoặc OKX</b> — thanh khoản lớn thật sự, không chỉ là biến động giá ảo — các coin này có nhãn riêng để phân biệt với điều kiện lọc chuẩn. Danh sách này giống hệt nhau ở cả 2 tab.
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12, color: C.textFaint }}>Khung mặc định khi bấm "Phân tích →"</span>
@@ -1631,7 +1665,7 @@ function DayTradeCard({ results, tier2, scanning, error, scanDayTrade, setCoinIn
             <div style={{ background: C.surface2, borderRadius: 8, padding: 12, fontSize: 12.5, color: C.textDim, lineHeight: 1.7 }}>
               <div><b style={{ color: C.text }}>Vì sao trống — chẩn đoán bộ lọc:</b></div>
               <div>• Tổng nguồn ứng viên (watchlist + khối lượng lớn): <b>{diag.poolSize}</b> coin</div>
-              <div>• Đạt biên độ 24h {rangeMin}-{rangeMax}%: <b>{diag.inRangeCount}</b> coin</div>
+              <div>• Đạt biên độ 24h {rangeMin}-{rangeMax}%: <b>{diag.inRangeCount}</b> coin{diag.volumeExceptionCount > 0 && <> · Vượt {rangeMax}% nhưng Top 20 khối lượng Binance/OKX (vẫn được xét): <b style={{ color: C.blue }}>{diag.volumeExceptionCount}</b> coin</>}</div>
               <div>• Đã kiểm tra tín hiệu (khung tốt nhất trong 15m/1h/4h): <b>{diag.checkedCount}</b> coin</div>
               <div>• Đạt LONG + target ≥{minTargetPct}%: <b style={{ color: diag.longCount > 0 ? C.bull : C.text }}>{diag.longCount}</b> · Đạt BREAKOUT NÓNG: <b style={{ color: C.amber }}>{diag.breakoutCount}</b></div>
               {diag.nearMiss && diag.nearMiss.length > 0 && (
