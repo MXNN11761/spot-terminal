@@ -1479,17 +1479,6 @@ function CryptoTerminal() {
           <button className="tt-btn" onClick={dismissPendingRemote} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 12px", color: C.textDim, fontSize: 12 }}>Bỏ qua</button>
         </div>
       )}
-      {updateInfo && (
-        <div style={{ background: C.amberDim, borderBottom: `1px solid ${C.amber}`, padding: "10px 28px", fontSize: 13, color: C.amber, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <Icon name="alert" size={15} />
-          <div><b>Có bản cập nhật mới: {updateInfo.version}.</b> {updateInfo.notes || ""} Hãy tải file mới nhất và host đè lên bản hiện tại để dùng phiên bản mới nhất.</div>
-        </div>
-      )}
-      {persistMode === "local" && (
-        <div style={{ background: C.bullDim, borderBottom: `1px solid ${C.border}`, padding: "10px 28px", fontSize: 13, color: C.bull, display: "flex", gap: 10, alignItems: "center" }}>
-          <Icon name="info" size={15} /> Vốn/lệnh đang được lưu tự động trên trình duyệt này (localStorage) — sẽ còn nguyên khi tải lại trang. Lưu ý: dữ liệu gắn với đúng trình duyệt + đúng file này trên máy này; đổi trình duyệt, xóa dữ liệu duyệt web, hoặc chuyển sang máy khác sẽ không thấy lại dữ liệu cũ.
-        </div>
-      )}
       {persistMode === "none" && (
         <div style={{ background: C.blueDim, borderBottom: `1px solid ${C.border}`, padding: "10px 28px", fontSize: 13, color: C.blue, display: "flex", gap: 10, alignItems: "center" }}>
           <Icon name="info" size={15} /> Trình duyệt này chặn lưu trữ cục bộ (có thể do chế độ ẩn danh) nên vốn/lệnh sẽ KHÔNG tự lưu — mất khi tải lại trang.
@@ -1518,6 +1507,22 @@ function CryptoTerminal() {
         {tab === "goals" && <GoalsTab capital={capital} setCapital={setCapital} currentEquity={currentEquity} trades={trades} goalBigTarget={goalBigTarget} setGoalBigTarget={setGoalBigTarget} goalMonthlyPct={goalMonthlyPct} setGoalMonthlyPct={setGoalMonthlyPct} goalAdjustments={goalAdjustments} addGoalAdjustment={addGoalAdjustment} deleteGoalAdjustment={deleteGoalAdjustment} goalSavings={goalSavings} addGoalSaving={addGoalSaving} deleteGoalSaving={deleteGoalSaving} goalMonths={goalMonths} addGoalMonth={addGoalMonth} removeGoalMonth={removeGoalMonth} editGoalMonthPct={editGoalMonthPct} />}
       </div>
       <div style={{ textAlign: "center", padding: "18px", fontSize: 11, color: C.textFaint, fontFamily: "'JetBrains Mono', monospace" }}>The big dream {VERSION} · dữ liệu từ Binance / CoinGecko / Alternative.me</div>
+
+      {(updateInfo || persistMode === "local") && (
+        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 28px 24px", display: "flex", flexDirection: "column", gap: 8, opacity: 0.55 }}>
+          {updateInfo && (
+            <div style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 14px", fontSize: 11.5, color: C.textFaint, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Icon name="alert" size={13} />
+              <div><b>Có bản cập nhật mới: {updateInfo.version}.</b> {updateInfo.notes || ""} Hãy tải file mới nhất và host đè lên bản hiện tại để dùng phiên bản mới nhất.</div>
+            </div>
+          )}
+          {persistMode === "local" && (
+            <div style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 14px", fontSize: 11.5, color: C.textFaint, display: "flex", gap: 8, alignItems: "center" }}>
+              <Icon name="info" size={13} /> Vốn/lệnh đang được lưu tự động trên trình duyệt này (localStorage) — sẽ còn nguyên khi tải lại trang. Lưu ý: dữ liệu gắn với đúng trình duyệt + đúng file này trên máy này; đổi trình duyệt, xóa dữ liệu duyệt web, hoặc chuyển sang máy khác sẽ không thấy lại dữ liệu cũ.
+            </div>
+          )}
+        </div>
+      )}
 
       <button className="tt-btn" onClick={() => setQuickChatOpen((v) => !v)} title="Tra cứu nhanh"
         style={{ position: "fixed", bottom: 20, right: 20, zIndex: 30, width: 52, height: 52, borderRadius: "50%", background: `linear-gradient(135deg, ${C.blue}, ${C.bull})`, boxShadow: "0 0 18px rgba(34,211,238,0.5)", border: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
